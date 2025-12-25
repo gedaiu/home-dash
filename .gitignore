@@ -1,2 +1,5 @@
-network-config.json
 node_modules
+data/
+network-config.json
+.DS_Store
+*.log

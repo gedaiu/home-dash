@@ -1,18 +1,28 @@
 {
   "name": "hue-nanoleaf-sync",
-  "version": "1.0.0",
-  "description": "CLI tool to discover and authenticate with Philips Hue Bridge and Nanoleaf panels",
-  "main": "scan.js",
+  "version": "2.0.0",
+  "description": "Web UI to sync Philips Hue lights with Nanoleaf panels",
+  "main": "src/server.js",
   "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
     "scan": "node scan.js",
     "verify": "node verify.js",
     "setup-sync": "node setup-sync.js",
     "sync": "node sync.js"
   },
   "dependencies": {
-    "node-hue-api": "^5.0.0-beta.16",
-    "bonjour-service": "^1.2.1",
     "axios": "^1.6.0",
-    "readline-sync": "^1.4.10"
+    "bonjour-service": "^1.2.1",
+    "express": "^4.18.2",
+    "node-hue-api": "^5.0.0-beta.16",
+    "readline-sync": "^1.4.10",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3"
   }
 }

@@ -1,0 +1,789 @@
+const API = {
+  hue: {
+    discover: () => fetch('/api/hue/discover').then(r => r.json()),
+    bridge: () => fetch('/api/hue/bridge').then(r => r.json()),
+    pair: (ip) => fetch('/api/hue/bridge/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip })
+    }).then(r => r.json()),
+    remove: () => fetch('/api/hue/bridge', { method: 'DELETE' }).then(r => r.json()),
+    rooms: () => fetch('/api/hue/rooms').then(r => r.json()),
+    lights: () => fetch('/api/hue/lights').then(r => r.json())
+  },
+  nanoleaf: {
+    discover: () => fetch('/api/nanoleaf/discover').then(r => r.json()),
+    device: () => fetch('/api/nanoleaf/device').then(r => r.json()),
+    pair: (ip, port) => fetch('/api/nanoleaf/device/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip, port })
+    }).then(r => r.json()),
+    remove: () => fetch('/api/nanoleaf/device', { method: 'DELETE' }).then(r => r.json()),
+    config: () => fetch('/api/nanoleaf/config').then(r => r.json()),
+    updateConfig: (config) => fetch('/api/nanoleaf/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    }).then(r => r.json())
+  },
+  sync: {
+    config: () => fetch('/api/sync/config').then(r => r.json()),
+    setConfig: (config) => fetch('/api/sync/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    }).then(r => r.json()),
+    start: () => fetch('/api/sync/start', { method: 'POST' }).then(r => r.json()),
+    stop: () => fetch('/api/sync/stop', { method: 'POST' }).then(r => r.json()),
+    status: () => fetch('/api/sync/status').then(r => r.json())
+  }
+};
+
+const CATEGORY_ICONS = {
+  motion: 'scan-eye',
+  temperature: 'thermometer',
+  lightlevel: 'sun-dim',
+  daylight: 'sun',
+  switch: 'toggle-left',
+  sensor: 'radio',
+  plug: 'plug',
+  strip: 'grip-horizontal',
+  candle: 'flame',
+  spot: 'circle-dot',
+  ceiling: 'lamp-ceiling',
+  lamp: 'lamp-desk',
+  bulb: 'lightbulb',
+  device: 'cpu'
+};
+
+const SYNCABLE_CATEGORIES = ['bulb', 'lamp', 'spot', 'ceiling', 'strip', 'candle'];
+
+let ws = null;
+let syncConfig = null;
+let selectedLightId = null;
+let allRooms = [];
+let allLights = [];
+
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+function log(message, type = '') {
+  const logContent = $('#log-content');
+  const time = new Date().toLocaleTimeString();
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.innerHTML = `
+    <span class="log-time">${time}</span>
+    <span class="log-msg ${type}">${message}</span>
+  `;
+  logContent.appendChild(line);
+  logContent.scrollTop = logContent.scrollHeight;
+
+  const footer = $('.footer');
+  footer.innerHTML = `
+    <span class="footer-time">${time}</span>
+    <span class="footer-msg ${type}">${message}</span>
+    <span class="blink">_</span>
+  `;
+  footer.classList.remove('flash');
+  void footer.offsetWidth;
+  footer.classList.add('flash');
+}
+
+function updateClock() {
+  $('#clock').textContent = new Date().toLocaleTimeString();
+}
+
+function connectWebSocket() {
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${protocol}//${location.host}`);
+
+  ws.onopen = () => {
+    $('#connection-status').classList.add('online');
+    $('#connection-status').innerHTML = `
+      <i data-lucide="wifi"></i>
+      <span>ONLINE</span>
+    `;
+    lucide.createIcons();
+    log('WebSocket connected', 'success');
+  };
+
+  ws.onclose = () => {
+    $('#connection-status').classList.remove('online');
+    $('#connection-status').innerHTML = `
+      <i data-lucide="wifi-off"></i>
+      <span>OFFLINE</span>
+    `;
+    lucide.createIcons();
+    log('WebSocket disconnected', 'error');
+    setTimeout(connectWebSocket, 3000);
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    handleWebSocketMessage(msg);
+  };
+}
+
+function handleWebSocketMessage(msg) {
+  switch (msg.type) {
+    case 'status':
+      updateSyncStatus(msg.data);
+      break;
+    case 'log':
+      log(msg.data.message);
+      break;
+    case 'config':
+      loadSyncConfig();
+      break;
+  }
+}
+
+function updateSyncStatus(status) {
+  const statusEl = $('#sync-status');
+  const lastEl = $('#sync-last');
+  const colorPreview = $('#color-preview');
+  const colorValue = $('#color-value');
+  const btnStart = $('#btn-start');
+  const btnStop = $('#btn-stop');
+
+  if (status.running) {
+    statusEl.textContent = 'RUNNING';
+    statusEl.classList.add('running');
+    btnStart.disabled = true;
+    btnStop.disabled = false;
+  } else {
+    statusEl.textContent = 'STOPPED';
+    statusEl.classList.remove('running');
+    btnStart.disabled = false;
+    btnStop.disabled = true;
+  }
+
+  if (status.lastSync) {
+    lastEl.textContent = new Date(status.lastSync).toLocaleTimeString();
+  }
+
+  if (status.currentColor) {
+    const { r, g, b } = status.currentColor;
+    colorPreview.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
+    colorValue.textContent = `RGB(${r}, ${g}, ${b})`;
+  }
+}
+
+async function loadHueBridge() {
+  const content = $('#hue-content');
+
+  try {
+    const bridge = await API.hue.bridge();
+
+    if (!bridge.configured) {
+      content.innerHTML = `
+        <div class="device-info">
+          <div class="info-row">
+            <span class="label">STATUS:</span>
+            <span class="status-badge offline">NOT CONFIGURED</span>
+          </div>
+          <p style="margin-top: 12px; color: var(--text-dim)">
+            Click the search icon to discover your Hue Bridge
+          </p>
+        </div>
+      `;
+      return;
+    }
+
+    content.innerHTML = `
+      <div class="device-info">
+        <div class="info-row">
+          <span class="label">STATUS:</span>
+          <span class="status-badge online">CONNECTED</span>
+        </div>
+        <div class="info-row">
+          <span class="label">NAME:</span>
+          <span class="value">${bridge.name}</span>
+        </div>
+        <div class="info-row">
+          <span class="label">IP:</span>
+          <span class="value">${bridge.ip}</span>
+        </div>
+        <div class="info-row">
+          <span class="label">API:</span>
+          <span class="value">${bridge.apiVersion}</span>
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    content.innerHTML = `<div class="loading error">Error: ${err.message}</div>`;
+  }
+}
+
+async function loadNanoleaf() {
+  const content = $('#nanoleaf-content');
+
+  try {
+    const device = await API.nanoleaf.device();
+
+    if (!device.configured) {
+      content.innerHTML = `
+        <div class="device-info">
+          <div class="info-row">
+            <span class="label">STATUS:</span>
+            <span class="status-badge offline">NOT CONFIGURED</span>
+          </div>
+          <p style="margin-top: 12px; color: var(--text-dim)">
+            Click the search icon to discover your Nanoleaf
+          </p>
+        </div>
+      `;
+      return;
+    }
+
+    const colorStyle = device.state.on
+      ? `background-color: hsl(${device.state.hue}, ${device.state.sat}%, 50%)`
+      : 'background-color: #333';
+
+    content.innerHTML = `
+      <div class="device-info">
+        <div class="info-row">
+          <span class="label">STATUS:</span>
+          <span class="status-badge ${device.state.on ? 'online' : 'offline'}">
+            ${device.state.on ? 'ON' : 'OFF'}
+          </span>
+        </div>
+        <div class="info-row">
+          <span class="label">NAME:</span>
+          <span class="value">${device.name}</span>
+        </div>
+        <div class="info-row">
+          <span class="label">MODEL:</span>
+          <span class="value">${device.model}</span>
+        </div>
+        <div class="info-row">
+          <span class="label">PANELS:</span>
+          <span class="value">${device.panelCount}</span>
+        </div>
+        <div class="info-row">
+          <span class="label">EFFECT:</span>
+          <span class="value">${device.effects.current || 'None'}</span>
+        </div>
+        <div class="info-row">
+          <span class="label">COLOR:</span>
+          <span class="value">
+            <span class="color-preview" style="${colorStyle}"></span>
+            BRI: ${device.state.brightness}%
+          </span>
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    content.innerHTML = `<div class="loading error">Error: ${err.message}</div>`;
+  }
+}
+
+function getDeviceIcon(category) {
+  return CATEGORY_ICONS[category] || 'cpu';
+}
+
+function renderSensorPanel(sensor) {
+  const icon = CATEGORY_ICONS[sensor.category] || 'radio';
+  const typeClass = `sensor-${sensor.category}`;
+
+  let value = '--';
+  let unit = '';
+
+  if (sensor.category === 'temperature' && sensor.state.temperature !== undefined) {
+    value = sensor.state.temperature.toFixed(1);
+    unit = '°C';
+  } else if (sensor.category === 'motion') {
+    value = sensor.state.presence ? 'DETECTED' : 'CLEAR';
+  } else if (sensor.category === 'lightlevel' && sensor.state.lightlevel !== undefined) {
+    value = sensor.state.lightlevel;
+    unit = ' lux';
+  } else if (sensor.category === 'switch') {
+    value = 'READY';
+  }
+
+  const activeClass = (sensor.category === 'motion' && sensor.state.presence) ? 'active' : '';
+
+  return `
+    <section class="sensor-panel ${typeClass} ${activeClass}">
+      <div class="sensor-header">
+        <i data-lucide="${icon}"></i>
+        <span>${sensor.name}</span>
+      </div>
+      <div class="sensor-content">
+        <span class="sensor-value">${value}<span class="sensor-unit">${unit}</span></span>
+      </div>
+    </section>
+  `;
+}
+
+function renderSensorPanels(sensors) {
+  const tempSensors = sensors.filter(s => s.category === 'temperature');
+  const motionSensors = sensors.filter(s => s.category === 'motion');
+  const lightSensors = sensors.filter(s => s.category === 'lightlevel');
+  const switches = sensors.filter(s => s.category === 'switch');
+
+  let html = '';
+
+  tempSensors.forEach(s => { html += renderSensorPanel(s); });
+  motionSensors.forEach(s => { html += renderSensorPanel(s); });
+  lightSensors.forEach(s => { html += renderSensorPanel(s); });
+  switches.forEach(s => { html += renderSensorPanel(s); });
+
+  return html;
+}
+
+async function loadRooms() {
+  const content = $('#rooms-content');
+
+  try {
+    const rooms = await API.hue.rooms();
+
+    if (rooms.length === 0) {
+      content.innerHTML = `<div class="loading">No rooms found. Configure Hue Bridge first.</div>`;
+      return;
+    }
+
+    allRooms = rooms;
+    allLights = rooms.flatMap(r => r.lights);
+    populateLightSelect();
+
+    const sensorsRoom = rooms.find(r => r.id === 'sensors');
+    const regularRooms = rooms.filter(r => r.id !== 'sensors');
+
+    if (sensorsRoom) {
+      $('#sensors-content').innerHTML = renderSensorPanels(sensorsRoom.lights);
+    }
+
+    let html = regularRooms.map(room => {
+      return `
+        <section class="panel room-panel">
+          <div class="panel-header">
+            <i data-lucide="layout-grid"></i>
+            <span>${room.name.toUpperCase()}</span>
+            <button class="btn-icon refresh-room" title="Refresh">
+              <i data-lucide="refresh-cw"></i>
+            </button>
+          </div>
+          <div class="panel-content">
+            <div class="lights-list">
+              ${room.lights.map(light => {
+                const isSelected = light.id === selectedLightId;
+                const isOn = light.state.on;
+                const color = getLightColor(light.state);
+                const icon = getDeviceIcon(light.category);
+                const stateText = getStateText(light);
+                return `
+                  <div class="light-item ${isSelected ? 'selected' : ''}"
+                       data-id="${light.id}"
+                       data-name="${light.name}"
+                       data-category="${light.category}">
+                    <i data-lucide="${icon}" class="device-icon ${isOn ? 'on' : ''}"></i>
+                    <span class="light-indicator ${isOn ? 'on' : ''}"
+                          style="background-color: ${color}"></span>
+                    <span class="light-name">${light.name}</span>
+                    <span class="light-state">${stateText}</span>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        </section>
+      `;
+    }).join('');
+
+    content.innerHTML = html;
+
+    lucide.createIcons();
+
+    $$('.light-item').forEach(el => {
+      el.addEventListener('click', () => selectLight(el));
+    });
+
+    $$('.refresh-room').forEach(el => {
+      el.addEventListener('click', loadRooms);
+    });
+  } catch (err) {
+    content.innerHTML = `<div class="loading error">Error: ${err.message}</div>`;
+  }
+}
+
+function getStateText(light) {
+  if (light.isSensor) {
+    if (light.state.temperature !== undefined) {
+      return `${light.state.temperature.toFixed(1)}C`;
+    }
+    if (light.state.presence !== undefined) {
+      return light.state.presence ? 'MOTION' : 'CLEAR';
+    }
+    if (light.state.lightlevel !== undefined) {
+      return `${light.state.lightlevel} lux`;
+    }
+    return '--';
+  }
+
+  if (!light.state.on) {
+    return 'OFF';
+  }
+
+  if (light.state.bri !== undefined) {
+    return `${Math.round(light.state.bri / 254 * 100)}%`;
+  }
+
+  return 'ON';
+}
+
+function getLightColor(state) {
+  if (!state.on) {
+    return '#333';
+  }
+
+  if (state.colormode === 'ct') {
+    const kelvin = Math.round(1000000 / state.ct);
+    if (kelvin < 4000) {
+      return '#ffcc88';
+    }
+    return '#fff5e6';
+  }
+
+  if (state.hue !== undefined && state.sat !== undefined) {
+    const h = (state.hue / 65535) * 360;
+    const s = (state.sat / 254) * 100;
+    return `hsl(${h}, ${s}%, 50%)`;
+  }
+
+  return '#fff';
+}
+
+function populateLightSelect() {
+  const select = $('#sync-source-select');
+  const currentValue = select.value;
+
+  select.innerHTML = '<option value="">-- Select a light --</option>';
+
+  allRooms.forEach(room => {
+    const syncableLights = room.lights.filter(l =>
+      SYNCABLE_CATEGORIES.includes(l.category)
+    );
+
+    if (syncableLights.length === 0) {
+      return;
+    }
+
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = room.name;
+
+    syncableLights.forEach(light => {
+      const option = document.createElement('option');
+      option.value = light.id;
+      option.textContent = light.name;
+      if (light.id === selectedLightId) {
+        option.selected = true;
+      }
+      optgroup.appendChild(option);
+    });
+
+    select.appendChild(optgroup);
+  });
+
+  if (currentValue && !select.value) {
+    select.value = currentValue;
+  }
+}
+
+async function selectLight(el) {
+  const id = parseInt(el.dataset.id, 10);
+  const name = el.dataset.name;
+  const category = el.dataset.category;
+
+  if (!SYNCABLE_CATEGORIES.includes(category)) {
+    log(`Cannot sync with ${category} device`, 'error');
+    return;
+  }
+
+  selectedLightId = id;
+
+  $$('.light-item').forEach(item => item.classList.remove('selected'));
+  el.classList.add('selected');
+
+  await API.sync.setConfig({ hueDeviceId: id, hueDeviceName: name });
+  $('#sync-source-select').value = id;
+  log(`Selected light: ${name}`);
+}
+
+async function onSourceSelectChange(e) {
+  const id = parseInt(e.target.value, 10);
+  if (!id) {
+    return;
+  }
+
+  const light = allLights.find(l => l.id === id);
+  if (!light) {
+    return;
+  }
+
+  selectedLightId = id;
+
+  $$('.light-item').forEach(item => {
+    item.classList.toggle('selected', parseInt(item.dataset.id, 10) === id);
+  });
+
+  await API.sync.setConfig({ hueDeviceId: id, hueDeviceName: light.name });
+  log(`Selected light: ${light.name}`);
+}
+
+async function loadSyncConfig() {
+  try {
+    syncConfig = await API.sync.config();
+    if (syncConfig.hueDeviceId) {
+      selectedLightId = syncConfig.hueDeviceId;
+      const select = $('#sync-source-select');
+      if (select) {
+        select.value = syncConfig.hueDeviceId;
+      }
+    }
+
+    const nanoleafConfig = await API.nanoleaf.config();
+    if (nanoleafConfig.configured) {
+      $('#min-brightness').value = nanoleafConfig.minBrightness;
+      $('#max-brightness').value = nanoleafConfig.maxBrightness;
+      $('#min-brightness-value').textContent = `${nanoleafConfig.minBrightness}%`;
+      $('#max-brightness-value').textContent = `${nanoleafConfig.maxBrightness}%`;
+      $('#brightness-range').textContent = `${nanoleafConfig.minBrightness}% - ${nanoleafConfig.maxBrightness}%`;
+    }
+
+    const status = await API.sync.status();
+    updateSyncStatus(status);
+  } catch (err) {
+    log(`Error loading config: ${err.message}`, 'error');
+  }
+}
+
+function showModal(title, content, footer = '') {
+  $('#modal-title').textContent = title;
+  $('#modal-body').innerHTML = content;
+  $('#modal-footer').innerHTML = footer;
+  $('#discover-modal').hidden = false;
+  lucide.createIcons();
+}
+
+function hideModal() {
+  $('#discover-modal').hidden = true;
+}
+
+async function discoverHue() {
+  showModal('DISCOVERING HUE BRIDGES', '<div class="loading">Scanning network...</div>');
+  log('Scanning for Hue bridges...');
+
+  try {
+    const bridges = await API.hue.discover();
+
+    if (bridges.length === 0) {
+      showModal('NO BRIDGES FOUND', `
+        <p>No Hue bridges were found on your network.</p>
+        <p style="margin-top: 12px">Make sure your bridge is powered on and connected to the same network.</p>
+      `, '<button class="btn" onclick="hideModal()">CLOSE</button>');
+      return;
+    }
+
+    showModal('SELECT HUE BRIDGE', `
+      <div class="device-list">
+        ${bridges.map(b => `
+          <div class="device-item" onclick="pairHue('${b.ip}')">
+            <i data-lucide="server"></i>
+            <span class="name">Hue Bridge</span>
+            <span class="ip">${b.ip}</span>
+          </div>
+        `).join('')}
+      </div>
+    `);
+    lucide.createIcons();
+  } catch (err) {
+    showModal('ERROR', `<p class="error">${err.message}</p>`,
+      '<button class="btn" onclick="hideModal()">CLOSE</button>');
+  }
+}
+
+async function pairHue(ip) {
+  showModal('PAIRING HUE BRIDGE', `
+    <div class="pairing-instructions">
+      <i data-lucide="circle-dot"></i>
+      <p>Press the <span class="highlight">Link button</span> on your Hue Bridge</p>
+      <p>Then click PAIR below</p>
+    </div>
+  `, `
+    <button class="btn" onclick="hideModal()">CANCEL</button>
+    <button class="btn btn-start" onclick="confirmPairHue('${ip}')">PAIR</button>
+  `);
+  lucide.createIcons();
+}
+
+async function confirmPairHue(ip) {
+  showModal('PAIRING...', '<div class="loading">Connecting to bridge...</div>');
+
+  try {
+    const result = await API.hue.pair(ip);
+
+    if (result.success) {
+      hideModal();
+      log('Hue Bridge paired successfully!', 'success');
+      await loadHueBridge();
+      await loadRooms();
+    } else {
+      showModal('PAIRING FAILED', `
+        <p class="error">${result.error}</p>
+        <p style="margin-top: 12px">Make sure you pressed the Link button, then try again.</p>
+      `, `
+        <button class="btn" onclick="hideModal()">CANCEL</button>
+        <button class="btn btn-start" onclick="pairHue('${ip}')">RETRY</button>
+      `);
+    }
+  } catch (err) {
+    showModal('ERROR', `<p class="error">${err.message}</p>`,
+      '<button class="btn" onclick="hideModal()">CLOSE</button>');
+  }
+}
+
+async function discoverNanoleaf() {
+  showModal('DISCOVERING NANOLEAF', '<div class="loading">Scanning network (10 seconds)...</div>');
+  log('Scanning for Nanoleaf devices...');
+
+  try {
+    const devices = await API.nanoleaf.discover();
+
+    if (devices.length === 0) {
+      showModal('NO DEVICES FOUND', `
+        <p>No Nanoleaf devices were found on your network.</p>
+        <p style="margin-top: 12px">Make sure your device is powered on and connected to the same network.</p>
+      `, '<button class="btn" onclick="hideModal()">CLOSE</button>');
+      return;
+    }
+
+    showModal('SELECT NANOLEAF', `
+      <div class="device-list">
+        ${devices.map(d => `
+          <div class="device-item" onclick="pairNanoleaf('${d.ip}', ${d.port})">
+            <i data-lucide="triangle"></i>
+            <span class="name">${d.name}</span>
+            <span class="ip">${d.ip}:${d.port}</span>
+          </div>
+        `).join('')}
+      </div>
+    `);
+    lucide.createIcons();
+  } catch (err) {
+    showModal('ERROR', `<p class="error">${err.message}</p>`,
+      '<button class="btn" onclick="hideModal()">CLOSE</button>');
+  }
+}
+
+async function pairNanoleaf(ip, port) {
+  showModal('PAIRING NANOLEAF', `
+    <div class="pairing-instructions">
+      <i data-lucide="hand"></i>
+      <p>Hold the <span class="highlight">power button</span> on your Nanoleaf for 5-7 seconds</p>
+      <p>Wait until the LED starts flashing, then click PAIR</p>
+    </div>
+  `, `
+    <button class="btn" onclick="hideModal()">CANCEL</button>
+    <button class="btn btn-start" onclick="confirmPairNanoleaf('${ip}', ${port})">PAIR</button>
+  `);
+  lucide.createIcons();
+}
+
+async function confirmPairNanoleaf(ip, port) {
+  showModal('PAIRING...', '<div class="loading">Connecting to Nanoleaf...</div>');
+
+  try {
+    const result = await API.nanoleaf.pair(ip, port);
+
+    if (result.success) {
+      hideModal();
+      log('Nanoleaf paired successfully!', 'success');
+      await loadNanoleaf();
+    } else {
+      showModal('PAIRING FAILED', `
+        <p class="error">${result.error}</p>
+        <p style="margin-top: 12px">Make sure you held the power button until the LED flashed.</p>
+      `, `
+        <button class="btn" onclick="hideModal()">CANCEL</button>
+        <button class="btn btn-start" onclick="pairNanoleaf('${ip}', ${port})">RETRY</button>
+      `);
+    }
+  } catch (err) {
+    showModal('ERROR', `<p class="error">${err.message}</p>`,
+      '<button class="btn" onclick="hideModal()">CLOSE</button>');
+  }
+}
+
+async function init() {
+  lucide.createIcons();
+  updateClock();
+  setInterval(updateClock, 1000);
+
+  connectWebSocket();
+
+  await loadSyncConfig();
+  await Promise.all([
+    loadHueBridge(),
+    loadNanoleaf(),
+    loadRooms()
+  ]);
+
+  $('#discover-hue').addEventListener('click', discoverHue);
+  $('#discover-nanoleaf').addEventListener('click', discoverNanoleaf);
+  $('#refresh-rooms').addEventListener('click', loadRooms);
+  $('#modal-close').addEventListener('click', hideModal);
+  $('#sync-source-select').addEventListener('change', onSourceSelectChange);
+
+  $('#btn-start').addEventListener('click', async () => {
+    const result = await API.sync.start();
+    if (!result.success) {
+      log(`Failed to start: ${result.error}`, 'error');
+    }
+  });
+
+  $('#btn-stop').addEventListener('click', async () => {
+    await API.sync.stop();
+  });
+
+  $('#clear-log').addEventListener('click', () => {
+    $('#log-content').innerHTML = '';
+    log('Log cleared');
+  });
+
+  $('#min-brightness').addEventListener('input', (e) => {
+    $('#min-brightness-value').textContent = `${e.target.value}%`;
+  });
+
+  $('#max-brightness').addEventListener('input', (e) => {
+    $('#max-brightness-value').textContent = `${e.target.value}%`;
+  });
+
+  $('#min-brightness').addEventListener('change', async (e) => {
+    await API.nanoleaf.updateConfig({ minBrightness: parseInt(e.target.value, 10) });
+    updateBrightnessRange();
+  });
+
+  $('#max-brightness').addEventListener('change', async (e) => {
+    await API.nanoleaf.updateConfig({ maxBrightness: parseInt(e.target.value, 10) });
+    updateBrightnessRange();
+  });
+
+  log('System ready');
+}
+
+function updateBrightnessRange() {
+  const min = $('#min-brightness').value;
+  const max = $('#max-brightness').value;
+  $('#brightness-range').textContent = `${min}% - ${max}%`;
+}
+
+window.hideModal = hideModal;
+window.pairHue = pairHue;
+window.confirmPairHue = confirmPairHue;
+window.pairNanoleaf = pairNanoleaf;
+window.confirmPairNanoleaf = confirmPairNanoleaf;
+
+document.addEventListener('DOMContentLoaded', init);
