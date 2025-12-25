@@ -83,7 +83,7 @@ async function getDevice() {
       model: data.model,
       firmwareVersion: data.firmwareVersion,
       serialNo: data.serialNo,
-      panelCount: data.panelLayout?.numPanels || 0,
+      panelCount: data.panelLayout?.layout?.numPanels || 0,
       state: {
         on: data.state?.on?.value,
         brightness: data.state?.brightness?.value,

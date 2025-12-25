@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HUE//NANOLEAF SYNC</title>
+  <title>HUE-RASSIC PARK</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
@@ -14,7 +14,7 @@
   <div class="crt">
     <header class="header">
       <div class="header-left">
-        <span class="logo">[ HUE//NANOLEAF SYNC ]</span>
+        <span class="logo">[ HUE-RASSIC PARK ]</span>
         <span class="version">v2.0.0</span>
       </div>
       <div class="header-right">
@@ -27,6 +27,12 @@
     </header>
 
     <main class="main">
+      <div class="sensors-row" id="sensors-content"></div>
+
+      <div class="rooms-grid" id="rooms-content">
+        <div class="loading">Loading rooms...</div>
+      </div>
+
       <div class="panel-row">
         <section class="panel" id="hue-panel">
           <div class="panel-header">
@@ -55,24 +61,21 @@
         </section>
       </div>
 
-      <div class="sensors-row" id="sensors-content"></div>
-
-      <div class="rooms-grid" id="rooms-content">
-        <div class="loading">Loading rooms...</div>
-      </div>
-
       <div class="bottom-grid">
         <section class="panel" id="sync-panel">
         <div class="panel-header">
           <i data-lucide="activity"></i>
           <span>SYNC CONTROL</span>
+          <button class="btn-icon" id="btn-sync-toggle" title="Start">
+            <i data-lucide="play"></i>
+          </button>
         </div>
         <div class="panel-content sync-content">
           <div class="sync-status">
             <div class="sync-info">
               <div class="sync-row">
                 <span class="label">STATUS:</span>
-                <span class="value" id="sync-status">STOPPED</span>
+                <span class="status-badge offline" id="sync-status">STOPPED</span>
               </div>
               <div class="sync-row">
                 <span class="label">SOURCE:</span>
@@ -93,16 +96,6 @@
                   <span id="color-value">---</span>
                 </span>
               </div>
-            </div>
-            <div class="sync-controls">
-              <button class="btn btn-start" id="btn-start">
-                <i data-lucide="play"></i>
-                START
-              </button>
-              <button class="btn btn-stop" id="btn-stop" disabled>
-                <i data-lucide="square"></i>
-                STOP
-              </button>
             </div>
           </div>
           <div class="brightness-config">

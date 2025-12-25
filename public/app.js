@@ -64,6 +64,8 @@ let syncConfig = null;
 let selectedLightId = null;
 let allRooms = [];
 let allLights = [];
+let nanoleafDevice = null;
+let nanoleafConfig = null;
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -145,20 +147,26 @@ function updateSyncStatus(status) {
   const lastEl = $('#sync-last');
   const colorPreview = $('#color-preview');
   const colorValue = $('#color-value');
-  const btnStart = $('#btn-start');
-  const btnStop = $('#btn-stop');
+  const btnToggle = $('#btn-sync-toggle');
 
   if (status.running) {
     statusEl.textContent = 'RUNNING';
-    statusEl.classList.add('running');
-    btnStart.disabled = true;
-    btnStop.disabled = false;
+    statusEl.classList.add('online');
+    statusEl.classList.remove('offline');
+    btnToggle.innerHTML = '<i data-lucide="square"></i>';
+    btnToggle.title = 'Stop';
+    btnToggle.classList.add('btn-stop');
+    btnToggle.classList.remove('btn-start');
   } else {
     statusEl.textContent = 'STOPPED';
-    statusEl.classList.remove('running');
-    btnStart.disabled = false;
-    btnStop.disabled = true;
+    statusEl.classList.add('offline');
+    statusEl.classList.remove('online');
+    btnToggle.innerHTML = '<i data-lucide="play"></i>';
+    btnToggle.title = 'Start';
+    btnToggle.classList.add('btn-start');
+    btnToggle.classList.remove('btn-stop');
   }
+  lucide.createIcons({ nodes: [btnToggle] });
 
   if (status.lastSync) {
     lastEl.textContent = new Date(status.lastSync).toLocaleTimeString();
@@ -334,11 +342,53 @@ function renderSensorPanels(sensors) {
   return html;
 }
 
+function renderNanoleafItem() {
+  if (!nanoleafDevice || !nanoleafConfig) {
+    return '';
+  }
+
+  const isOn = nanoleafDevice.state.on;
+  const color = isOn ? getNanoleafColor(nanoleafDevice.state) : '#333';
+  const stateText = isOn ? `${nanoleafDevice.state.brightness}%` : 'OFF';
+
+  return `
+    <div class="light-item nanoleaf-item ${isOn ? '' : 'off'}"
+         data-id="nanoleaf"
+         data-name="${nanoleafDevice.name}"
+         data-category="nanoleaf">
+      <i data-lucide="triangle" class="device-icon ${isOn ? 'on' : ''}"></i>
+      <span class="light-indicator ${isOn ? 'on' : ''}"
+            style="background-color: ${color}"></span>
+      <span class="light-name">${nanoleafDevice.name}</span>
+      <span class="light-state">${stateText}</span>
+    </div>
+  `;
+}
+
+function getNanoleafColor(state) {
+  if (!state.on) {
+    return '#333';
+  }
+
+  if (state.hue !== undefined && state.sat !== undefined) {
+    return `hsl(${state.hue}, ${state.sat}%, 50%)`;
+  }
+
+  return '#fff';
+}
+
 async function loadRooms() {
   const content = $('#rooms-content');
 
   try {
-    const rooms = await API.hue.rooms();
+    const [rooms, device, config] = await Promise.all([
+      API.hue.rooms(),
+      API.nanoleaf.device(),
+      API.nanoleaf.config()
+    ]);
+
+    nanoleafDevice = device?.configured ? device : null;
+    nanoleafConfig = config?.configured ? config : null;
 
     if (rooms.length === 0) {
       content.innerHTML = `<div class="loading">No rooms found. Configure Hue Bridge first.</div>`;
@@ -357,6 +407,8 @@ async function loadRooms() {
     }
 
     let html = regularRooms.map(room => {
+      const showNanoleaf = nanoleafConfig?.roomId?.toLowerCase() === room.name.toLowerCase();
+
       return `
         <section class="panel room-panel">
           <div class="panel-header">
@@ -368,6 +420,7 @@ async function loadRooms() {
           </div>
           <div class="panel-content">
             <div class="lights-list">
+              ${showNanoleaf ? renderNanoleafItem() : ''}
               ${room.lights.map(light => {
                 const isSelected = light.id === selectedLightId;
                 const isOn = light.state.on;
@@ -396,10 +449,6 @@ async function loadRooms() {
     content.innerHTML = html;
 
     lucide.createIcons();
-
-    $$('.light-item').forEach(el => {
-      el.addEventListener('click', () => selectLight(el));
-    });
 
     $$('.refresh-room').forEach(el => {
       el.addEventListener('click', loadRooms);
@@ -737,15 +786,16 @@ async function init() {
   $('#modal-close').addEventListener('click', hideModal);
   $('#sync-source-select').addEventListener('change', onSourceSelectChange);
 
-  $('#btn-start').addEventListener('click', async () => {
-    const result = await API.sync.start();
-    if (!result.success) {
-      log(`Failed to start: ${result.error}`, 'error');
+  $('#btn-sync-toggle').addEventListener('click', async () => {
+    const isRunning = $('#sync-status').textContent === 'RUNNING';
+    if (isRunning) {
+      await API.sync.stop();
+    } else {
+      const result = await API.sync.start();
+      if (!result.success) {
+        log(`Failed to start: ${result.error}`, 'error');
+      }
     }
-  });
-
-  $('#btn-stop').addEventListener('click', async () => {
-    await API.sync.stop();
   });
 
   $('#clear-log').addEventListener('click', () => {

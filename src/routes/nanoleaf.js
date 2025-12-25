@@ -40,12 +40,13 @@ router.get('/config', (req, res) => {
   res.json({
     configured: true,
     minBrightness: config.minBrightness ?? 5,
-    maxBrightness: config.maxBrightness ?? 100
+    maxBrightness: config.maxBrightness ?? 100,
+    roomId: config.roomId ?? null
   });
 });
 
 router.put('/config', asyncHandler(async (req, res) => {
-  const { minBrightness, maxBrightness } = req.body;
+  const { minBrightness, maxBrightness, roomId } = req.body;
   const updates = {};
 
   if (minBrightness !== undefined) {
@@ -53,6 +54,9 @@ router.put('/config', asyncHandler(async (req, res) => {
   }
   if (maxBrightness !== undefined) {
     updates.maxBrightness = maxBrightness;
+  }
+  if (roomId !== undefined) {
+    updates.roomId = roomId;
   }
 
   nanoleafService.updateConfig(updates);
