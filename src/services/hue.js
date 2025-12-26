@@ -102,6 +102,10 @@ function updateSensorHistory(sensorId, category, state) {
     };
   }
 
+  if (category === 'motion') {
+    return { history: sensorHistory[sensorId] || [], dailyStats };
+  }
+
   return { history: displayHistory[sensorId], dailyStats };
 }
 

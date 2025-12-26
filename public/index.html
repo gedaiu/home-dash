@@ -28,54 +28,29 @@
     </header>
 
     <main class="main">
+      <div class="panel-row" id="devices-row">
+        <section class="panel" id="roomba-panel">
+          <div class="panel-header">
+            <i data-lucide="bot"></i>
+            <span>ROOMBA</span>
+          </div>
+          <div class="panel-content" id="roomba-content">
+            <div class="loading">Connecting...</div>
+          </div>
+        </section>
+      </div>
+
+      <div class="crt-divider"></div>
+
       <div class="sensors-row" id="sensors-content"></div>
 
       <div class="crt-divider"></div>
+
       <div class="rooms-grid" id="rooms-content">
         <div class="loading">Loading rooms...</div>
       </div>
+
       <div class="crt-divider"></div>
-
-      <div class="panel-row">
-        <section class="panel" id="hue-panel">
-          <div class="panel-header">
-            <i data-lucide="lightbulb"></i>
-            <span>HUE BRIDGE</span>
-            <button class="btn-icon" id="discover-hue" title="Discover">
-              <i data-lucide="search"></i>
-            </button>
-          </div>
-          <div class="panel-content" id="hue-content">
-            <div class="loading">Connecting...</div>
-          </div>
-        </section>
-
-        <section class="panel" id="nanoleaf-panel">
-          <div class="panel-header">
-            <i data-lucide="triangle"></i>
-            <span>NANOLEAF</span>
-            <button class="btn-icon" id="discover-nanoleaf" title="Discover">
-              <i data-lucide="search"></i>
-            </button>
-          </div>
-          <div class="panel-content" id="nanoleaf-content">
-            <div class="loading">Connecting...</div>
-          </div>
-        </section>
-
-        <section class="panel" id="airpurifier-panel">
-          <div class="panel-header">
-            <i data-lucide="wind"></i>
-            <span>AIR PURIFIERS</span>
-            <button class="btn-icon" id="discover-airpurifier" title="Discover">
-              <i data-lucide="search"></i>
-            </button>
-          </div>
-          <div class="panel-content" id="airpurifier-content">
-            <div class="loading">Connecting...</div>
-          </div>
-        </section>
-      </div>
 
       <div class="bottom-grid">
         <section class="panel" id="sync-panel">
@@ -148,6 +123,45 @@
           </div>
         </div>
       </section>
+
+        <section class="panel" id="hue-panel">
+          <div class="panel-header">
+            <i data-lucide="lightbulb"></i>
+            <span>HUE BRIDGE</span>
+            <button class="btn-icon" id="discover-hue" title="Discover">
+              <i data-lucide="search"></i>
+            </button>
+          </div>
+          <div class="panel-content" id="hue-content">
+            <div class="loading">Connecting...</div>
+          </div>
+        </section>
+
+        <section class="panel" id="nanoleaf-panel">
+          <div class="panel-header">
+            <i data-lucide="triangle"></i>
+            <span>NANOLEAF</span>
+            <button class="btn-icon" id="discover-nanoleaf" title="Discover">
+              <i data-lucide="search"></i>
+            </button>
+          </div>
+          <div class="panel-content" id="nanoleaf-content">
+            <div class="loading">Connecting...</div>
+          </div>
+        </section>
+
+        <section class="panel" id="airpurifier-panel">
+          <div class="panel-header">
+            <i data-lucide="wind"></i>
+            <span>AIR PURIFIERS</span>
+            <button class="btn-icon" id="discover-airpurifier" title="Discover">
+              <i data-lucide="search"></i>
+            </button>
+          </div>
+          <div class="panel-content" id="airpurifier-content">
+            <div class="loading">Connecting...</div>
+          </div>
+        </section>
       </div>
     </main>
 

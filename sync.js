@@ -3,6 +3,7 @@
 const { api } = require('node-hue-api');
 const axios = require('axios');
 const fs = require('node:fs');
+const dorita980 = require('dorita980');
 
 const CONFIG_FILE = './network-config.json';
 const POLL_INTERVAL_SLOW_MS = 5000;
@@ -23,6 +24,22 @@ function loadConfig() {
   } catch {
     return null;
   }
+}
+
+function roombaPhaseToColor(phase) {
+  const phaseColors = {
+    'charging': { r: 0, g: 255, b: 0 },
+    'cleaning': { r: 0, g: 150, b: 255 },
+    'stuck': { r: 255, g: 0, b: 0 },
+    'stopped': { r: 100, g: 100, b: 100 },
+    'paused': { r: 255, g: 200, b: 0 },
+    'returning': { r: 255, g: 165, b: 0 },
+    'docking': { r: 255, g: 200, b: 0 },
+    'emptying': { r: 150, g: 0, b: 255 },
+    'error': { r: 255, b: 0, g: 0 },
+    'cancelled': { r: 200, g: 200, b: 200 }
+  };
+  return phaseColors[phase] || { r: 128, g: 128, b: 128 };
 }
 
 function hueToRgb(hue, sat, bri) {
@@ -265,25 +282,11 @@ function rgbToHsl(r, g, b) {
   };
 }
 
-async function main() {
-  console.log('=== Hue to Nanoleaf Sync ===\n');
-
-  const config = loadConfig();
-
-  if (!config) {
-    console.log('No configuration found. Run "node scan.js" first.');
-    process.exit(1);
-  }
-
-  if (!config.sync?.hueDeviceId) {
-    console.log('No sync device configured. Run "node setup-sync.js" first.');
-    process.exit(1);
-  }
-
+async function syncHueDevice(config) {
   const minBri = config.nanoleaf?.minBrightness ?? DEFAULT_MIN_BRIGHTNESS;
   const maxBri = config.nanoleaf?.maxBrightness ?? DEFAULT_MAX_BRIGHTNESS;
 
-  console.log(`Syncing: "${config.sync.hueDeviceName}" -> Nanoleaf`);
+  console.log(`Syncing: "${config.sync.hueDeviceName || config.sync.deviceName}" -> Nanoleaf`);
   console.log(`Poll interval: ${POLL_INTERVAL_SLOW_MS}ms (${POLL_INTERVAL_FAST_MS}ms for ${FAST_POLL_DURATION_MS / 1000}s after change)`);
   console.log(`Saturation threshold for animation: ${SATURATION_THRESHOLD}%`);
   console.log(`Nanoleaf brightness range: ${minBri}% - ${maxBri}%`);
@@ -293,12 +296,11 @@ async function main() {
   let lastState = null;
   let nanoleafOff = false;
   let fastPollUntil = 0;
-  let pollTimer = null;
 
   const schedulePoll = () => {
     const now = Date.now();
     const interval = now < fastPollUntil ? POLL_INTERVAL_FAST_MS : POLL_INTERVAL_SLOW_MS;
-    pollTimer = setTimeout(async () => {
+    setTimeout(async () => {
       await poll();
       schedulePoll();
     }, interval);
@@ -306,7 +308,8 @@ async function main() {
 
   const poll = async () => {
     try {
-      const light = await hueApi.lights.getLight(config.sync.hueDeviceId);
+      const deviceId = config.sync.hueDeviceId || config.sync.deviceId;
+      const light = await hueApi.lights.getLight(deviceId);
       const state = light.state || light._data?.state;
 
       if (!state.on) {
@@ -361,6 +364,109 @@ async function main() {
 
   await poll();
   schedulePoll();
+}
+
+function parseMission(mission) {
+  if (!mission) {
+    return { phase: 'unknown', cycle: 'none' };
+  }
+
+  const phaseMap = {
+    'charge': 'charging',
+    'run': 'cleaning',
+    'stuck': 'stuck',
+    'stop': 'stopped',
+    'pause': 'paused',
+    'hmMidMsn': 'returning',
+    'hmPostMsn': 'returning',
+    'hmUsrDock': 'docking',
+    'evac': 'emptying',
+    'chargingerror': 'error',
+    'cancelled': 'cancelled'
+  };
+
+  return {
+    phase: phaseMap[mission.phase] || mission.phase || 'unknown',
+    cycle: mission.cycle || 'none'
+  };
+}
+
+async function syncRoombaDevice(config) {
+  console.log(`Syncing: Roomba -> Nanoleaf`);
+  console.log(`Poll interval: ${POLL_INTERVAL_SLOW_MS}ms`);
+  console.log('\nPress Ctrl+C to stop.\n');
+
+  const { blid, password, ip } = config.roomba;
+  const robot = new dorita980.Local(blid, password, ip);
+  let lastPhase = null;
+
+  robot.on('error', (err) => {
+    console.error('Roomba connection error:', err.message);
+  });
+
+  const poll = async () => {
+    try {
+      const state = await robot.getRobotState(['cleanMissionStatus', 'batPct']);
+      const mission = parseMission(state.cleanMissionStatus);
+
+      if (mission.phase !== lastPhase) {
+        const rgb = roombaPhaseToColor(mission.phase);
+
+        console.log(`${new Date().toLocaleTimeString()} - Roomba phase: ${mission.phase}`);
+        console.log(`  Battery: ${state.batPct}%`);
+        console.log(`  RGB: (${rgb.r}, ${rgb.g}, ${rgb.b})`);
+
+        await setNanoleafColor(config, rgb, 200, false);
+        lastPhase = mission.phase;
+      }
+    } catch (err) {
+      console.error(`Error polling Roomba: ${err.message}`);
+    }
+  };
+
+  const schedulePoll = () => {
+    setTimeout(async () => {
+      await poll();
+      schedulePoll();
+    }, POLL_INTERVAL_SLOW_MS);
+  };
+
+  await poll();
+  schedulePoll();
+
+  process.on('SIGINT', () => {
+    console.log('\nDisconnecting from Roomba...');
+    robot.end();
+    process.exit(0);
+  });
+}
+
+async function main() {
+  console.log('=== Device to Nanoleaf Sync ===\n');
+
+  const config = loadConfig();
+
+  if (!config) {
+    console.log('No configuration found. Run "node scan.js" first.');
+    process.exit(1);
+  }
+
+  const deviceType = config.sync?.deviceType || (config.sync?.hueDeviceId ? 'hue' : null);
+
+  if (!deviceType && !config.sync?.hueDeviceId) {
+    console.log('No sync device configured. Run "node setup-sync.js" first.');
+    process.exit(1);
+  }
+
+  if (deviceType === 'roomba') {
+    if (!config.roomba?.ip || !config.roomba?.blid || !config.roomba?.password) {
+      console.log('Roomba not fully configured. Run "node scan.js" to configure Roomba credentials.');
+      process.exit(1);
+    }
+    await syncRoombaDevice(config);
+  } else {
+    await syncHueDevice(config);
+  }
 }
 
 main();

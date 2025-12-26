@@ -7,6 +7,80 @@ const DATA_DIR = path.join(__dirname, '../../data');
 const SENSORS_DIR = path.join(DATA_DIR, 'sensors');
 const LOGS_DIR = path.join(DATA_DIR, 'logs');
 
+let configWatcher = null;
+let lastConfigMtime = 0;
+let debounceTimer = null;
+const changeListeners = [];
+
+function onConfigChange(listener) {
+  changeListeners.push(listener);
+}
+
+function notifyConfigChange(config) {
+  console.log('[storage] Config file changed, notifying listeners...');
+  for (const listener of changeListeners) {
+    try {
+      listener(config);
+    } catch (err) {
+      console.error('[storage] Error in config change listener:', err.message);
+    }
+  }
+}
+
+function startWatching() {
+  if (configWatcher || isTest) {
+    return;
+  }
+
+  if (!fs.existsSync(CONFIG_FILE)) {
+    return;
+  }
+
+  try {
+    lastConfigMtime = fs.statSync(CONFIG_FILE).mtimeMs;
+  } catch {
+    lastConfigMtime = 0;
+  }
+
+  configWatcher = fs.watch(CONFIG_FILE, { persistent: false }, (eventType) => {
+    if (eventType !== 'change') {
+      return;
+    }
+
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+
+    debounceTimer = setTimeout(() => {
+      try {
+        const stat = fs.statSync(CONFIG_FILE);
+        if (stat.mtimeMs === lastConfigMtime) {
+          return;
+        }
+        lastConfigMtime = stat.mtimeMs;
+
+        const config = load();
+        notifyConfigChange(config);
+      } catch {
+        // File might be temporarily unavailable
+      }
+    }, 200);
+  });
+
+  console.log('[storage] Watching config file for changes');
+}
+
+function stopWatching() {
+  if (configWatcher) {
+    configWatcher.close();
+    configWatcher = null;
+  }
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+  }
+}
+
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -102,6 +176,34 @@ function setSync(syncConfig) {
 
 function getAirPurifiers() {
   return load().airPurifiers || [];
+}
+
+function getRoomba() {
+  return load().roomba || null;
+}
+
+function getHomeConnect() {
+  return load().homeConnect || null;
+}
+
+function setHomeConnect(homeConnectConfig) {
+  const config = load();
+  config.homeConnect = homeConnectConfig;
+  save(config);
+}
+
+function getHomeConnectTokens() {
+  const hc = getHomeConnect();
+  return hc?.tokens || null;
+}
+
+function setHomeConnectTokens(tokens) {
+  const config = load();
+  if (!config.homeConnect) {
+    config.homeConnect = {};
+  }
+  config.homeConnect.tokens = tokens;
+  save(config);
 }
 
 function getAirPurifier(id) {
@@ -296,6 +398,11 @@ module.exports = {
   addAirPurifier,
   updateAirPurifier,
   removeAirPurifier,
+  getRoomba,
+  getHomeConnect,
+  setHomeConnect,
+  getHomeConnectTokens,
+  setHomeConnectTokens,
   loadSensorData,
   saveSensorData,
   logLightChange,
@@ -303,5 +410,8 @@ module.exports = {
   zigzagDecode,
   encodeHistory,
   decodeHistory,
-  getMidnightMs
+  getMidnightMs,
+  onConfigChange,
+  startWatching,
+  stopWatching
 };

@@ -1,0 +1,398 @@
+const storage = require('./storage');
+
+const API_BASE = 'https://api.home-connect.com';
+const AUTH_URL = 'https://api.home-connect.com/security/oauth/authorize';
+const TOKEN_URL = 'https://api.home-connect.com/security/oauth/token';
+
+const POLL_INTERVAL_MS = 30000;
+
+let broadcastFn = null;
+let pollTimer = null;
+let cachedAppliances = [];
+
+function getConfig() {
+  return storage.getHomeConnect() || {};
+}
+
+function getTokens() {
+  return storage.getHomeConnectTokens();
+}
+
+function isConfigured() {
+  const config = getConfig();
+  return !!(config.clientId && config.clientSecret);
+}
+
+function isAuthenticated() {
+  const tokens = getTokens();
+  return !!(tokens?.access_token);
+}
+
+function getAuthUrl(redirectUri) {
+  const config = getConfig();
+  if (!config.clientId) {
+    throw new Error('Home Connect not configured');
+  }
+
+  const params = new URLSearchParams({
+    client_id: config.clientId,
+    response_type: 'code',
+    redirect_uri: redirectUri,
+    scope: 'IdentifyAppliance Monitor Settings'
+  });
+
+  return `${AUTH_URL}?${params.toString()}`;
+}
+
+async function exchangeCode(code, redirectUri) {
+  const config = getConfig();
+
+  const params = new URLSearchParams({
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: redirectUri
+  });
+
+  const response = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString()
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Token exchange failed: ${error}`);
+  }
+
+  const tokens = await response.json();
+  storage.setHomeConnectTokens({
+    access_token: tokens.access_token,
+    refresh_token: tokens.refresh_token,
+    expires_in: tokens.expires_in,
+    timestamp: Date.now()
+  });
+
+  return tokens;
+}
+
+async function refreshTokens() {
+  const config = getConfig();
+  const tokens = getTokens();
+
+  if (!tokens?.refresh_token) {
+    throw new Error('No refresh token available');
+  }
+
+  const params = new URLSearchParams({
+    client_secret: config.clientSecret,
+    grant_type: 'refresh_token',
+    refresh_token: tokens.refresh_token
+  });
+
+  const response = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString()
+  });
+
+  if (!response.ok) {
+    storage.setHomeConnectTokens(null);
+    throw new Error('Token refresh failed - re-authentication required');
+  }
+
+  const newTokens = await response.json();
+  storage.setHomeConnectTokens({
+    access_token: newTokens.access_token,
+    refresh_token: newTokens.refresh_token,
+    expires_in: newTokens.expires_in,
+    timestamp: Date.now()
+  });
+
+  return newTokens;
+}
+
+async function getAccessToken() {
+  const tokens = getTokens();
+  if (!tokens) {
+    throw new Error('Not authenticated');
+  }
+
+  const expiresAt = tokens.timestamp + (tokens.expires_in * 1000);
+  if (Date.now() > expiresAt - 60000) {
+    const newTokens = await refreshTokens();
+    return newTokens.access_token;
+  }
+
+  return tokens.access_token;
+}
+
+async function apiRequest(path, options = {}) {
+  const accessToken = await getAccessToken();
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Accept': 'application/vnd.bsh.sdk.v1+json',
+      ...options.headers
+    }
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`API request failed: ${response.status} ${error}`);
+  }
+
+  return response.json();
+}
+
+async function getAppliances() {
+  const result = await apiRequest('/api/homeappliances');
+  cachedAppliances = result.data?.homeappliances || [];
+  return cachedAppliances;
+}
+
+async function getApplianceStatus(haId) {
+  const result = await apiRequest(`/api/homeappliances/${haId}/status`);
+  return result.data?.status || [];
+}
+
+async function getApplianceProgram(haId) {
+  try {
+    const result = await apiRequest(`/api/homeappliances/${haId}/programs/active`);
+    return result.data || null;
+  } catch {
+    return null;
+  }
+}
+
+async function getApplianceEvents(haId) {
+  try {
+    const result = await apiRequest(`/api/homeappliances/${haId}/events`);
+    return result.data?.items || [];
+  } catch {
+    return [];
+  }
+}
+
+function parseOperationState(state) {
+  const states = {
+    'BSH.Common.EnumType.OperationState.Inactive': 'inactive',
+    'BSH.Common.EnumType.OperationState.Ready': 'ready',
+    'BSH.Common.EnumType.OperationState.DelayedStart': 'delayed',
+    'BSH.Common.EnumType.OperationState.Run': 'running',
+    'BSH.Common.EnumType.OperationState.Pause': 'paused',
+    'BSH.Common.EnumType.OperationState.ActionRequired': 'action_required',
+    'BSH.Common.EnumType.OperationState.Finished': 'finished',
+    'BSH.Common.EnumType.OperationState.Error': 'error',
+    'BSH.Common.EnumType.OperationState.Aborting': 'aborting'
+  };
+  return states[state] || state;
+}
+
+function parseDoorState(state) {
+  const states = {
+    'BSH.Common.EnumType.DoorState.Open': 'open',
+    'BSH.Common.EnumType.DoorState.Closed': 'closed',
+    'BSH.Common.EnumType.DoorState.Locked': 'locked'
+  };
+  return states[state] || state;
+}
+
+function parseProgramName(key) {
+  if (!key) {
+    return null;
+  }
+
+  const match = key.match(/\.(\w+)$/);
+  if (match) {
+    return match[1].replace(/([A-Z])/g, ' $1').trim();
+  }
+  return key;
+}
+
+async function getDishwasherStatus(haId) {
+  const [statusList, program, events] = await Promise.all([
+    getApplianceStatus(haId),
+    getApplianceProgram(haId),
+    getApplianceEvents(haId)
+  ]);
+
+  const status = {};
+  for (const item of statusList) {
+    const key = item.key.split('.').pop();
+    status[key] = item.value;
+  }
+
+  let remainingTime = null;
+  let elapsedTime = null;
+  let progress = null;
+  let startInRelative = null;
+  let estimatedTotalTime = null;
+
+  if (program?.options) {
+    for (const opt of program.options) {
+      if (opt.key === 'BSH.Common.Option.RemainingProgramTime') {
+        remainingTime = opt.value;
+      }
+      if (opt.key === 'BSH.Common.Option.ProgramProgress') {
+        progress = opt.value;
+      }
+      if (opt.key === 'BSH.Common.Option.ElapsedProgramTime') {
+        elapsedTime = opt.value;
+      }
+      if (opt.key === 'BSH.Common.Option.StartInRelative') {
+        startInRelative = opt.value;
+      }
+      if (opt.key === 'BSH.Common.Option.EstimatedTotalProgramTime') {
+        estimatedTotalTime = opt.value;
+      }
+    }
+  }
+
+  const warnings = [];
+  for (const event of events) {
+    if (event.key === 'Dishcare.Dishwasher.Event.SaltNearlyEmpty') {
+      warnings.push('salt_low');
+    }
+    if (event.key === 'Dishcare.Dishwasher.Event.RinseAidNearlyEmpty') {
+      warnings.push('rinse_aid_low');
+    }
+  }
+
+  return {
+    operationState: parseOperationState(status.OperationState),
+    doorState: parseDoorState(status.DoorState),
+    remoteControlActive: status.RemoteControlActive || false,
+    remoteStartAllowed: status.RemoteControlStartAllowed || false,
+    localControlActive: status.LocalControlActive || false,
+    warnings,
+    program: program ? {
+      name: parseProgramName(program.key),
+      remainingTime,
+      elapsedTime,
+      progress,
+      startInRelative,
+      estimatedTotalTime
+    } : null
+  };
+}
+
+async function getAllStatuses() {
+  if (!isAuthenticated()) {
+    return [];
+  }
+
+  try {
+    const appliances = cachedAppliances.length > 0 ? cachedAppliances : await getAppliances();
+    const statuses = [];
+
+    for (const appliance of appliances) {
+      try {
+        let status = null;
+
+        if (appliance.type === 'Dishwasher') {
+          status = await getDishwasherStatus(appliance.haId);
+        } else {
+          const statusList = await getApplianceStatus(appliance.haId);
+          status = {};
+          for (const item of statusList) {
+            const key = item.key.split('.').pop();
+            status[key] = item.value;
+          }
+        }
+
+        statuses.push({
+          id: appliance.haId,
+          name: appliance.name,
+          type: appliance.type,
+          brand: appliance.brand,
+          connected: appliance.connected,
+          status
+        });
+      } catch (err) {
+        statuses.push({
+          id: appliance.haId,
+          name: appliance.name,
+          type: appliance.type,
+          brand: appliance.brand,
+          connected: false,
+          error: err.message
+        });
+      }
+    }
+
+    return statuses;
+  } catch (err) {
+    console.error('Home Connect polling error:', err.message);
+    return [];
+  }
+}
+
+function setBroadcast(fn) {
+  broadcastFn = fn;
+}
+
+function broadcast(type, data) {
+  if (broadcastFn) {
+    broadcastFn({ type, data });
+  }
+}
+
+async function pollAppliances() {
+  try {
+    const statuses = await getAllStatuses();
+    if (statuses.length > 0) {
+      broadcast('homeconnect', statuses);
+    }
+  } catch {
+    // Ignore polling errors
+  }
+}
+
+function startPolling() {
+  if (pollTimer || !isAuthenticated()) {
+    return;
+  }
+
+  pollTimer = setInterval(pollAppliances, POLL_INTERVAL_MS);
+  pollAppliances();
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function configure(clientId, clientSecret) {
+  storage.setHomeConnect({
+    clientId,
+    clientSecret,
+    tokens: null
+  });
+}
+
+function disconnect() {
+  stopPolling();
+  storage.setHomeConnect(null);
+  cachedAppliances = [];
+}
+
+module.exports = {
+  isConfigured,
+  isAuthenticated,
+  configure,
+  getAuthUrl,
+  exchangeCode,
+  getAppliances,
+  getAllStatuses,
+  getDishwasherStatus,
+  setBroadcast,
+  startPolling,
+  stopPolling,
+  disconnect
+};

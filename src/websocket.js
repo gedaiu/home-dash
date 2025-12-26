@@ -2,6 +2,9 @@ const WebSocket = require('ws');
 const syncService = require('./services/sync');
 const hueService = require('./services/hue');
 const airpurifierService = require('./services/airpurifier');
+const homeconnectService = require('./services/homeconnect');
+const roombaService = require('./services/roomba');
+const storage = require('./services/storage');
 
 let wss = null;
 const clients = new Set();
@@ -38,8 +41,39 @@ function init(server) {
   syncService.setBroadcast(broadcast);
   hueService.setBroadcast(broadcast);
   airpurifierService.setBroadcast(broadcast);
+  homeconnectService.setBroadcast(broadcast);
+  roombaService.setBroadcast(broadcast);
   hueService.startPolling();
   airpurifierService.startPolling();
+  homeconnectService.startPolling();
+  roombaService.startPolling();
+
+  storage.onConfigChange(handleConfigChange);
+  storage.startWatching();
+}
+
+function handleConfigChange(config) {
+  console.log('[websocket] Config changed, reloading services...');
+
+  hueService.stopPolling();
+  airpurifierService.stopPolling();
+  homeconnectService.stopPolling();
+  roombaService.stopPolling();
+
+  hueService.startPolling();
+  airpurifierService.startPolling();
+  homeconnectService.startPolling();
+  roombaService.startPolling();
+
+  broadcast({
+    type: 'config_changed',
+    data: { message: 'Configuration reloaded' }
+  });
+
+  broadcast({
+    type: 'status',
+    data: syncService.getStatus()
+  });
 }
 
 function handleMessage(ws, data) {

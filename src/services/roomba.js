@@ -1,0 +1,364 @@
+const mqtt = require('mqtt');
+const crypto = require('crypto');
+const storage = require('./storage');
+
+const POLL_INTERVAL_MS = 30000;
+const STATE_TIMEOUT_MS = 5000;
+const CONNECTION_TIMEOUT_MS = 10000;
+
+let broadcastFn = null;
+let pollTimer = null;
+let mqttClient = null;
+let robotState = {};
+
+function getConfig() {
+  return storage.getRoomba();
+}
+
+function isConfigured() {
+  const config = getConfig();
+  return !!(config?.ip && config?.blid && config?.password);
+}
+
+async function connect(timeout = CONNECTION_TIMEOUT_MS) {
+  const config = getConfig();
+  if (!config || !config.blid || !config.password) {
+    return null;
+  }
+
+  if (mqttClient && mqttClient.connected) {
+    return mqttClient;
+  }
+
+  disconnect();
+
+  return new Promise((resolve) => {
+    const timeoutId = setTimeout(() => {
+      console.error('[roomba] Connection timeout');
+      disconnect();
+      resolve(null);
+    }, timeout);
+
+    try {
+      const url = `tls://${config.ip}:8883`;
+      const options = {
+        username: config.blid,
+        password: config.password,
+        rejectUnauthorized: false,
+        protocolId: 'MQTT',
+        protocolVersion: 4,
+        clean: false,
+        clientId: config.blid,
+        ciphers: 'HIGH:!DH:!aNULL',
+        secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+        reconnectPeriod: 0
+      };
+
+      mqttClient = mqtt.connect(url, options);
+
+      mqttClient.on('connect', () => {
+        clearTimeout(timeoutId);
+        console.log('[roomba] Connected');
+        mqttClient.subscribe('#');
+        resolve(mqttClient);
+      });
+
+      mqttClient.on('message', (topic, message) => {
+        try {
+          const data = JSON.parse(message.toString());
+          if (data.state?.reported) {
+            robotState = { ...robotState, ...data.state.reported };
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      });
+
+      mqttClient.on('error', (err) => {
+        clearTimeout(timeoutId);
+        console.error('[roomba] Connection error:', err.message);
+        disconnect();
+        resolve(null);
+      });
+
+      mqttClient.on('offline', () => {
+        clearTimeout(timeoutId);
+        console.error('[roomba] Robot went offline');
+        disconnect();
+        resolve(null);
+      });
+
+      mqttClient.on('close', () => {
+        clearTimeout(timeoutId);
+      });
+    } catch (err) {
+      clearTimeout(timeoutId);
+      console.error('[roomba] Failed to create connection:', err.message);
+      resolve(null);
+    }
+  });
+}
+
+function disconnect() {
+  robotState = {};
+  if (mqttClient) {
+    try {
+      mqttClient.end(true);
+    } catch {
+      // Ignore disconnect errors
+    }
+    mqttClient = null;
+  }
+}
+
+async function getRobotState(timeout = STATE_TIMEOUT_MS) {
+  if (!mqttClient || !mqttClient.connected) {
+    return null;
+  }
+
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+
+    const checkState = () => {
+      if (robotState.batPct !== undefined) {
+        resolve(robotState);
+        return;
+      }
+
+      if (Date.now() - startTime > timeout) {
+        resolve(robotState);
+        return;
+      }
+
+      setTimeout(checkState, 100);
+    };
+
+    checkState();
+  });
+}
+
+function parseMission(mission) {
+  if (!mission) {
+    return { phase: 'unknown', cycle: 'none' };
+  }
+
+  const phaseMap = {
+    'charge': 'charging',
+    'run': 'cleaning',
+    'stuck': 'stuck',
+    'stop': 'stopped',
+    'pause': 'paused',
+    'hmMidMsn': 'returning',
+    'hmPostMsn': 'returning',
+    'hmUsrDock': 'docking',
+    'evac': 'emptying',
+    'chargingerror': 'error',
+    'cancelled': 'cancelled'
+  };
+
+  return {
+    phase: phaseMap[mission.phase] || mission.phase || 'unknown',
+    cycle: mission.cycle || 'none',
+    error: mission.error || null,
+    notReady: mission.notReady || null,
+    mssnM: mission.mssnM || null,
+    sqft: mission.sqft || null,
+    expireM: mission.expireM || null
+  };
+}
+
+function parseBattery(batPct) {
+  if (batPct === undefined || batPct === null) {
+    return { percent: null, level: 'unknown' };
+  }
+
+  let level = 'low';
+  if (batPct >= 80) {
+    level = 'full';
+  } else if (batPct >= 40) {
+    level = 'medium';
+  }
+
+  return { percent: batPct, level };
+}
+
+function parseBin(bin) {
+  if (!bin) {
+    return { present: false, full: false };
+  }
+
+  return {
+    present: bin.present !== false,
+    full: bin.full === true
+  };
+}
+
+async function getStatus() {
+  const config = getConfig();
+  if (!config || !config.ip || !config.blid || !config.password) {
+    return null;
+  }
+
+  try {
+    const client = await connect();
+    if (!client) {
+      return {
+        name: config.name || 'Roomba',
+        ip: config.ip,
+        connected: false,
+        error: 'Failed to connect'
+      };
+    }
+
+    const state = await getRobotState();
+
+    if (!state || state.batPct === undefined) {
+      return {
+        name: config.name || 'Roomba',
+        ip: config.ip,
+        connected: true,
+        error: 'Waiting for robot data'
+      };
+    }
+
+    const mission = parseMission(state.cleanMissionStatus);
+    const battery = parseBattery(state.batPct);
+    const bin = parseBin(state.bin);
+
+    return {
+      name: state.name || config.name || 'Roomba',
+      ip: config.ip,
+      connected: true,
+      battery,
+      mission,
+      bin,
+      dock: state.dock || {},
+      signal: state.signal?.rssi || null
+    };
+  } catch (err) {
+    disconnect();
+    return {
+      name: config.name || 'Roomba',
+      ip: config.ip,
+      connected: false,
+      error: err.message
+    };
+  }
+}
+
+function sendCommand(command, params = {}) {
+  if (!mqttClient || !mqttClient.connected) {
+    throw new Error('Not connected to Roomba');
+  }
+
+  const config = getConfig();
+  const topic = `cmd`;
+  const message = JSON.stringify({
+    command,
+    time: Math.floor(Date.now() / 1000),
+    initiator: 'localApp',
+    ...params
+  });
+
+  mqttClient.publish(topic, message);
+}
+
+async function start() {
+  const client = await connect();
+  if (!client) {
+    throw new Error('Roomba not connected');
+  }
+
+  sendCommand('start');
+}
+
+async function stop() {
+  const client = await connect();
+  if (!client) {
+    throw new Error('Roomba not connected');
+  }
+
+  sendCommand('stop');
+}
+
+async function pause() {
+  const client = await connect();
+  if (!client) {
+    throw new Error('Roomba not connected');
+  }
+
+  sendCommand('pause');
+}
+
+async function resume() {
+  const client = await connect();
+  if (!client) {
+    throw new Error('Roomba not connected');
+  }
+
+  sendCommand('resume');
+}
+
+async function dock() {
+  const client = await connect();
+  if (!client) {
+    throw new Error('Roomba not connected');
+  }
+
+  sendCommand('dock');
+}
+
+function setBroadcast(fn) {
+  broadcastFn = fn;
+}
+
+function broadcast(type, data) {
+  if (broadcastFn) {
+    broadcastFn({ type, data });
+  }
+}
+
+async function pollRoomba() {
+  if (!isConfigured()) {
+    return;
+  }
+
+  try {
+    const status = await getStatus();
+    if (status) {
+      broadcast('roomba', status);
+    }
+  } catch {
+    // Ignore polling errors
+  }
+}
+
+function startPolling() {
+  if (pollTimer || !isConfigured()) {
+    return;
+  }
+
+  pollTimer = setInterval(pollRoomba, POLL_INTERVAL_MS);
+  pollRoomba();
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+  disconnect();
+}
+
+module.exports = {
+  isConfigured,
+  getStatus,
+  start,
+  stop,
+  pause,
+  resume,
+  dock,
+  setBroadcast,
+  startPolling,
+  stopPolling
+};

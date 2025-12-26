@@ -1,306 +1,21 @@
 #!/usr/bin/env node
 
-const { discovery, api } = require('node-hue-api');
-const Bonjour = require('bonjour-service').default;
-const axios = require('axios');
 const readline = require('readline-sync');
 const fs = require('node:fs');
 const fsPromises = require('node:fs/promises');
-const dgram = require('node:dgram');
-const { HttpClient, PlainCoapClient, CoapClient } = require('philips-air');
-const dorita980 = require('dorita980');
+
+const discovery = require('./src/discovery');
+const auth = require('./src/auth');
 
 const CONFIG_FILE = './network-config.json';
-const NANOLEAF_DEFAULT_PORT = 16021;
-const APP_NAME = 'hue-nanoleaf-sync';
-const DEVICE_NAME = 'cli-scanner';
 
-async function discoverHueBridge() {
-  console.log('Scanning for Philips Hue Bridge...');
-
-  let bridges = await discovery.nupnpSearch();
-
-  if (bridges.length === 0) {
-    console.log('N-UPnP search found nothing, trying UPnP (takes ~5 seconds)...');
-    bridges = await discovery.upnpSearch(5000);
-  }
-
-  if (bridges.length === 0) {
-    throw new Error('No Hue Bridge found on the network');
-  }
-
-  const bridge = bridges[0];
-  console.log(`Found Hue Bridge at ${bridge.ipaddress}`);
-  return bridge.ipaddress;
-}
-
-async function discoverNanoleaf(timeout = 10000) {
-  console.log('\nScanning for Nanoleaf panels...');
-
-  return new Promise((resolve) => {
-    const bonjour = new Bonjour();
-    const foundDevices = [];
-
-    const browser = bonjour.find({ type: 'nanoleafapi' });
-
-    browser.on('up', (service) => {
-      const ip = service.addresses?.find((addr) => !addr.includes(':')) || service.host;
-      const port = service.port || NANOLEAF_DEFAULT_PORT;
-
-      console.log(`Found Nanoleaf: ${service.name} at ${ip}:${port}`);
-      foundDevices.push({ name: service.name, ip, port });
-    });
-
-    setTimeout(() => {
-      browser.stop();
-      bonjour.destroy();
-
-      if (foundDevices.length === 0) {
-        console.log('No Nanoleaf devices found on the network.');
-        resolve(null);
-      } else {
-        resolve(foundDevices[0]);
-      }
-    }, timeout);
-  });
-}
-
-async function discoverAirPurifiers(timeout = 10000) {
-  console.log('\nScanning for Philips Air Purifiers (SSDP)...');
-
-  return new Promise((resolve) => {
-    const devices = [];
-    const seen = new Set();
-
-    const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
-
-    socket.on('error', () => {
-      socket.close();
-      resolve(devices);
-    });
-
-    socket.on('message', (msg, rinfo) => {
-      const response = msg.toString();
-
-      if (response.includes('philips') || response.includes('Air') || response.includes('Purifier')) {
-        if (!seen.has(rinfo.address)) {
-          seen.add(rinfo.address);
-          console.log(`Found potential air purifier at ${rinfo.address}`);
-          devices.push({
-            ip: rinfo.address,
-            name: `Air Purifier (${rinfo.address})`
-          });
-        }
-      }
-    });
-
-    socket.bind(() => {
-      socket.setBroadcast(true);
-
-      const ssdpMessage = Buffer.from(
-        'M-SEARCH * HTTP/1.1\r\n' +
-        'HOST: 239.255.255.250:1900\r\n' +
-        'MAN: "ssdp:discover"\r\n' +
-        'MX: 3\r\n' +
-        'ST: urn:philips-com:device:DiProduct:1\r\n' +
-        '\r\n'
-      );
-
-      socket.send(ssdpMessage, 0, ssdpMessage.length, 1900, '239.255.255.250');
-
-      setTimeout(() => {
-        const ssdpAll = Buffer.from(
-          'M-SEARCH * HTTP/1.1\r\n' +
-          'HOST: 239.255.255.250:1900\r\n' +
-          'MAN: "ssdp:discover"\r\n' +
-          'MX: 3\r\n' +
-          'ST: ssdp:all\r\n' +
-          '\r\n'
-        );
-        socket.send(ssdpAll, 0, ssdpAll.length, 1900, '239.255.255.250');
-      }, 1000);
-    });
-
-    setTimeout(() => {
-      socket.close();
-
-      if (devices.length === 0) {
-        console.log('No air purifiers found via SSDP.');
-        console.log('Tip: You can manually enter the IP address if you know it.');
-      }
-
-      resolve(devices);
-    }, timeout);
-  });
-}
-
-async function discoverRoomba(timeout = 5000) {
-  console.log('\nScanning for iRobot Roomba...');
-
-  return new Promise((resolve) => {
-    const timeoutId = setTimeout(() => {
-      resolve(null);
-    }, timeout);
-
-    dorita980.getRobotIP((err, ip) => {
-      clearTimeout(timeoutId);
-
-      if (err) {
-        console.log('No Roomba found broadcasting on the network.');
-        resolve(null);
-      } else {
-        console.log(`Found Roomba at ${ip}`);
-        resolve(ip);
-      }
-    });
-  });
-}
-
-async function testAirPurifierConnection(ip) {
-  const protocols = ['http', 'plain-coap', 'coap'];
-
-  for (const protocol of protocols) {
-    try {
-      let client;
-      switch (protocol) {
-        case 'coap':
-          client = new CoapClient(ip, 5000);
-          break;
-        case 'plain-coap':
-          client = new PlainCoapClient(ip, 5000);
-          break;
-        default:
-          client = new HttpClient(ip, 5000);
-      }
-
-      const status = await client.getStatus();
-      console.log(`Connected via ${protocol.toUpperCase()} protocol`);
-      return { success: true, protocol, status };
-    } catch {
-      // Try next protocol
-    }
-  }
-
-  return { success: false };
-}
-
-async function authenticateHueBridge(ipAddress) {
-  console.log('\n=== Hue Bridge Authentication ===');
-
-  const unauthenticatedApi = await api.createLocal(ipAddress).connect();
-  const maxRetries = 3;
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    readline.question('Press the Link button on your Hue Bridge, then press Enter... ');
-
-    try {
-      const createdUser = await unauthenticatedApi.users.createUser(APP_NAME, DEVICE_NAME);
-      console.log('Successfully authenticated with Hue Bridge!');
-      return createdUser.username;
-    } catch (err) {
-      const isLinkButtonError = err.getHueErrorType && err.getHueErrorType() === 101;
-
-      if (isLinkButtonError) {
-        console.log(`Link button not pressed (attempt ${attempt}/${maxRetries})`);
-        if (attempt < maxRetries) {
-          console.log('Please try again...');
-        }
-      } else {
-        throw err;
-      }
-    }
-  }
-
-  throw new Error('Failed to authenticate with Hue Bridge after maximum retries');
-}
-
-async function authenticateNanoleaf(ip, port) {
-  console.log('\n=== Nanoleaf Authentication ===');
-
-  const maxRetries = 3;
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    readline.question('Hold the power button on your Nanoleaf for 5-7 seconds until the LED flashes, then press Enter... ');
-
-    try {
-      const response = await axios.post(`http://${ip}:${port}/api/v1/new`, {}, { timeout: 5000 });
-      const authToken = response.data.auth_token;
-
-      if (!authToken) {
-        throw new Error('Invalid response from Nanoleaf API: missing auth_token');
-      }
-
-      console.log('Successfully authenticated with Nanoleaf!');
-      return authToken;
-    } catch (err) {
-      if (err.response?.status === 403) {
-        console.log(`Nanoleaf not in pairing mode (attempt ${attempt}/${maxRetries})`);
-        if (attempt < maxRetries) {
-          console.log('Please try again - hold the power button for 5-7 seconds...');
-        }
-      } else if (err.code === 'ECONNREFUSED') {
-        throw new Error(`Cannot connect to Nanoleaf at ${ip}:${port}`);
-      } else {
-        throw err;
-      }
-    }
-  }
-
-  throw new Error('Failed to authenticate with Nanoleaf after maximum retries');
-}
-
-async function configureAirPurifier(ip) {
-  console.log(`\n=== Configuring Air Purifier at ${ip} ===`);
-
-  const result = await testAirPurifierConnection(ip);
-
-  if (!result.success) {
-    console.log('Could not connect using any protocol.');
-    return null;
-  }
-
-  const id = `purifier-${ip.replace(/\./g, '-')}`;
-  const name = result.status?.name || `Air Purifier (${ip})`;
-
-  console.log(`Connected to: ${name}`);
-
-  if (result.status?.pm25 !== undefined) {
-    console.log(`Current PM2.5: ${result.status.pm25}`);
-  }
-
-  return {
-    id,
-    ip,
-    protocol: result.protocol,
-    name
-  };
-}
-
-async function authenticateRoomba(ip) {
-  console.log('\n=== Roomba Authentication ===');
-  console.log('IMPORTANT: Before continuing:');
-  console.log('1. Make sure the Roomba is on the Home Base (docked)');
-  console.log('2. Press and HOLD the HOME button for 2 seconds');
-  console.log('3. Wait for the Roomba to play a tone');
-  console.log('4. You have about 1 minute to complete this\n');
-
-  readline.question('Press Enter when the Roomba is ready... ');
-
-  try {
-    const data = await dorita980.getPasswordCloud(ip);
-    console.log('Successfully got Roomba credentials!');
-    return {
-      blid: data.blid,
-      password: data.password
-    };
-  } catch (err) {
-    console.log(`Failed to get Roomba credentials: ${err.message}`);
-    console.log('Troubleshooting:');
-    console.log('- Make sure you held HOME button until you heard a tone');
-    console.log('- Try again within 1 minute of pressing the button');
-    return null;
-  }
-}
+const DEVICE_TYPES = [
+  { id: 'hue', name: 'Philips Hue Bridge' },
+  { id: 'nanoleaf', name: 'Nanoleaf panels' },
+  { id: 'airpurifier', name: 'Philips Air Purifiers' },
+  { id: 'roomba', name: 'iRobot Roomba' },
+  { id: 'homeconnect', name: 'Bosch/Siemens Home Connect' }
+];
 
 async function backupConfig() {
   if (!fs.existsSync(CONFIG_FILE)) {
@@ -357,136 +72,358 @@ function hasRoombaConfig(config) {
   return config?.roomba?.ip && config?.roomba?.blid && config?.roomba?.password;
 }
 
+function hasHomeConnectConfig(config) {
+  return config?.homeConnect?.clientId && config?.homeConnect?.clientSecret;
+}
+
+function getConfigStatus(config, deviceId) {
+  switch (deviceId) {
+    case 'hue':
+      return hasHueConfig(config) ? `configured (${config.hue.ip})` : 'not configured';
+    case 'nanoleaf':
+      return hasNanoleafConfig(config) ? `configured (${config.nanoleaf.ip})` : 'not configured';
+    case 'airpurifier':
+      return hasAirPurifierConfig(config) ? `configured (${config.airPurifiers.length} device(s))` : 'not configured';
+    case 'roomba':
+      return hasRoombaConfig(config) ? `configured (${config.roomba.ip})` : 'not configured';
+    case 'homeconnect':
+      return hasHomeConnectConfig(config) ? 'configured' : 'not configured';
+    default:
+      return 'unknown';
+  }
+}
+
+function showDeviceMenu(existingConfig) {
+  console.log('\nSelect devices to scan/configure:\n');
+  console.log('  0. All devices');
+
+  DEVICE_TYPES.forEach((device, index) => {
+    const status = getConfigStatus(existingConfig, device.id);
+    console.log(`  ${index + 1}. ${device.name} [${status}]`);
+  });
+
+  console.log('');
+
+  const input = readline.question('Enter numbers separated by commas (e.g., 1,3,4) or 0 for all: ');
+
+  if (input.trim() === '0' || input.trim() === '') {
+    return DEVICE_TYPES.map(d => d.id);
+  }
+
+  const selectedNumbers = input.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n >= 1 && n <= DEVICE_TYPES.length);
+
+  if (selectedNumbers.length === 0) {
+    console.log('No valid selection. Scanning all devices.');
+    return DEVICE_TYPES.map(d => d.id);
+  }
+
+  return selectedNumbers.map(n => DEVICE_TYPES[n - 1].id);
+}
+
+async function discoverAndConfigureHue(config) {
+  console.log('\nScanning for Philips Hue Bridge...');
+
+  const ip = await discovery.hue.discoverBridge();
+
+  if (!ip) {
+    console.log('No Hue Bridge found on the network.');
+    return false;
+  }
+
+  console.log(`Found Hue Bridge at ${ip}`);
+  config.hue.ip = ip;
+
+  console.log('\n=== Hue Bridge Authentication ===');
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    readline.question('Press the Link button on your Hue Bridge, then press Enter... ');
+
+    const result = await auth.hue.authenticate(ip, 1);
+
+    if (result.success) {
+      console.log('Successfully authenticated with Hue Bridge!');
+      config.hue.username = result.username;
+      return true;
+    }
+
+    if (result.retriesExhausted) {
+      console.log(`Link button not pressed (attempt ${attempt}/3)`);
+      if (attempt < 3) {
+        console.log('Please try again...');
+      }
+    } else {
+      console.log(`Authentication failed: ${result.error}`);
+      return false;
+    }
+  }
+
+  console.log('Failed to authenticate with Hue Bridge after maximum retries');
+  return false;
+}
+
+async function discoverAndConfigureNanoleaf(config) {
+  console.log('\nScanning for Nanoleaf panels...');
+
+  const devices = await discovery.nanoleaf.discoverDevices();
+
+  if (devices.length === 0) {
+    console.log('No Nanoleaf devices found on the network.');
+    return false;
+  }
+
+  const device = devices[0];
+  console.log(`Found Nanoleaf: ${device.name} at ${device.ip}:${device.port}`);
+
+  config.nanoleaf.ip = device.ip;
+  config.nanoleaf.port = device.port;
+
+  console.log('\n=== Nanoleaf Authentication ===');
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    readline.question('Hold the power button on your Nanoleaf for 5-7 seconds until the LED flashes, then press Enter... ');
+
+    const result = await auth.nanoleaf.authenticate(device.ip, device.port, 1);
+
+    if (result.success) {
+      console.log('Successfully authenticated with Nanoleaf!');
+      config.nanoleaf.authToken = result.authToken;
+      return true;
+    }
+
+    if (result.retriesExhausted) {
+      console.log(`Nanoleaf not in pairing mode (attempt ${attempt}/3)`);
+      if (attempt < 3) {
+        console.log('Please try again - hold the power button for 5-7 seconds...');
+      }
+    } else {
+      console.log(`Authentication failed: ${result.error}`);
+      return false;
+    }
+  }
+
+  console.log('Failed to authenticate with Nanoleaf after maximum retries');
+  return false;
+}
+
+async function discoverAndConfigureAirPurifiers(config) {
+  console.log('\nScanning for Philips Air Purifiers (SSDP)...');
+
+  let devices = await discovery.airpurifier.discoverDevices();
+
+  if (devices.length === 0) {
+    console.log('No air purifiers found via SSDP.');
+    console.log('Tip: You can manually enter the IP address if you know it.');
+
+    const manualAdd = readline.keyInYN('\nWould you like to manually enter an air purifier IP address?');
+
+    if (manualAdd) {
+      const ip = readline.question('Enter the IP address: ');
+      if (ip) {
+        devices.push({ ip, name: `Air Purifier (${ip})` });
+      }
+    }
+  } else {
+    devices.forEach(d => console.log(`Found potential air purifier at ${d.ip}`));
+  }
+
+  const addMore = devices.length > 0 && readline.keyInYN('Add another air purifier manually?');
+  if (addMore) {
+    const ip = readline.question('Enter the IP address: ');
+    if (ip) {
+      devices.push({ ip, name: `Air Purifier (${ip})` });
+    }
+  }
+
+  for (const device of devices) {
+    console.log(`\n=== Configuring Air Purifier at ${device.ip} ===`);
+
+    const connectionResult = await discovery.airpurifier.testConnection(device.ip);
+
+    if (!connectionResult.success) {
+      console.log('Could not connect using any protocol.');
+      continue;
+    }
+
+    const purifierConfig = discovery.airpurifier.createConfig(device.ip, connectionResult);
+
+    if (purifierConfig) {
+      console.log(`Connected to: ${purifierConfig.name} via ${connectionResult.protocol.toUpperCase()}`);
+
+      if (connectionResult.status?.pm25 !== undefined) {
+        console.log(`Current PM2.5: ${connectionResult.status.pm25}`);
+      }
+
+      config.airPurifiers.push(purifierConfig);
+    }
+  }
+
+  return config.airPurifiers.length > 0;
+}
+
+async function discoverAndConfigureRoomba(config) {
+  console.log('\nScanning for iRobot Roomba...');
+
+  let ip = await discovery.roomba.discoverDevice();
+
+  if (!ip) {
+    console.log('No Roomba found broadcasting on the network.');
+
+    const manualAdd = readline.keyInYN('\nWould you like to manually enter the Roomba IP address?');
+
+    if (manualAdd) {
+      ip = readline.question('Enter the IP address: ');
+    }
+  } else {
+    console.log(`Found Roomba at ${ip}`);
+  }
+
+  if (!ip) {
+    return false;
+  }
+
+  console.log('\n=== Roomba Authentication ===');
+  console.log('IMPORTANT: Follow these steps IN ORDER:');
+  console.log('');
+  console.log('1. Make sure the Roomba is on the Home Base (docked)');
+  console.log('2. Press the CLEAN button once to wake up the Roomba');
+  console.log('3. Wait for the Roomba to show it is awake (lights on)');
+  console.log('4. Press and HOLD the HOME button for 2 seconds');
+  console.log('5. Wait for the Roomba to play a series of tones');
+  console.log('6. The WIFI light should start flashing');
+  console.log('7. You have about 1 minute to complete this\n');
+
+  readline.question('Press Enter IMMEDIATELY after the WIFI light starts flashing... ');
+
+  console.log('Getting robot credentials...');
+
+  const result = await auth.roomba.authenticate(ip);
+
+  if (result.success) {
+    console.log('Successfully got Roomba credentials!');
+    console.log(`  BLID: ${result.blid}`);
+    config.roomba.ip = ip;
+    config.roomba.blid = result.blid;
+    config.roomba.password = result.password;
+    return true;
+  }
+
+  console.log(`\nFailed to get Roomba credentials: ${result.error}`);
+  console.log('\nTroubleshooting:');
+  console.log('- Make sure the Roomba is docked and powered on');
+  console.log('- Hold HOME button for 2+ seconds until you hear tones');
+  console.log('- The WIFI light should start flashing');
+  console.log('- Run this script again within 1 minute of pressing the button');
+  console.log('- Make sure the IP address is correct');
+
+  const keepIp = readline.keyInYN('\nSave the IP address anyway (you can try authentication later)?');
+  if (keepIp) {
+    config.roomba.ip = ip;
+  }
+
+  return false;
+}
+
+function configureHomeConnect() {
+  console.log('\n=== Home Connect Configuration ===');
+  console.log('Home Connect requires cloud API access from Bosch/Siemens.');
+  console.log('');
+  console.log('To get started:');
+  console.log('1. Go to https://developer.home-connect.com');
+  console.log('2. Create an account and register a new application');
+  console.log('3. Select "Authorization Code Grant Flow" as OAuth Flow');
+  console.log('4. Set Redirect URI to: http://localhost:3000/api/homeconnect/auth/callback');
+  console.log('   (or your server URL + /api/homeconnect/auth/callback)');
+  console.log('');
+
+  const clientId = readline.question('Enter your Client ID (or press Enter to skip): ');
+  if (!clientId) {
+    console.log('Skipping Home Connect configuration.');
+    return null;
+  }
+
+  const clientSecret = readline.question('Enter your Client Secret: ');
+  if (!clientSecret) {
+    console.log('Skipping Home Connect configuration.');
+    return null;
+  }
+
+  console.log('Home Connect credentials saved.');
+  console.log('After starting the server, open the web UI and click the');
+  console.log('search icon on the Home Connect panel to complete authentication.');
+
+  return {
+    clientId,
+    clientSecret,
+    tokens: null
+  };
+}
+
 async function main() {
   console.log('=== Smart Home Network Scanner ===\n');
   console.log('This tool will discover and configure:');
   console.log('- Philips Hue Bridge');
   console.log('- Nanoleaf panels');
   console.log('- Philips Air Purifiers');
-  console.log('- iRobot Roomba\n');
+  console.log('- iRobot Roomba');
+  console.log('- Bosch/Siemens Home Connect appliances');
 
   const existingConfig = loadExistingConfig();
-  let resetHue = true;
-  let resetNanoleaf = true;
-  let resetAirPurifiers = true;
-  let resetRoomba = true;
 
-  if (hasHueConfig(existingConfig)) {
-    console.log(`Hue Bridge already configured (${existingConfig.hue.ip})`);
-    resetHue = readline.keyInYN('Reset Hue Bridge configuration?');
+  const selectedDevices = showDeviceMenu(existingConfig);
+
+  if (selectedDevices.length === 0) {
+    console.log('\nNo devices selected. Exiting.');
+    process.exit(0);
   }
 
-  if (hasNanoleafConfig(existingConfig)) {
-    console.log(`Nanoleaf already configured (${existingConfig.nanoleaf.ip})`);
-    resetNanoleaf = readline.keyInYN('Reset Nanoleaf configuration?');
-  }
-
-  if (hasAirPurifierConfig(existingConfig)) {
-    console.log(`Air Purifiers already configured (${existingConfig.airPurifiers.length} device(s))`);
-    resetAirPurifiers = readline.keyInYN('Reset Air Purifier configuration?');
-  }
-
-  if (hasRoombaConfig(existingConfig)) {
-    console.log(`Roomba already configured (${existingConfig.roomba.ip})`);
-    resetRoomba = readline.keyInYN('Reset Roomba configuration?');
-  }
+  console.log(`\nSelected: ${selectedDevices.join(', ')}`);
 
   const config = {
-    hue: resetHue ? { ip: null, username: null } : existingConfig?.hue || { ip: null, username: null },
-    nanoleaf: resetNanoleaf ? { ip: null, port: null, authToken: null } : existingConfig?.nanoleaf || { ip: null, port: null, authToken: null },
-    airPurifiers: resetAirPurifiers ? [] : existingConfig?.airPurifiers || [],
-    roomba: resetRoomba ? { ip: null, blid: null, password: null } : existingConfig?.roomba || { ip: null, blid: null, password: null },
+    hue: existingConfig?.hue || { ip: null, username: null },
+    nanoleaf: existingConfig?.nanoleaf || { ip: null, port: null, authToken: null },
+    airPurifiers: existingConfig?.airPurifiers || [],
+    roomba: existingConfig?.roomba || { ip: null, blid: null, password: null },
+    homeConnect: existingConfig?.homeConnect || null,
     sync: existingConfig?.sync || null
   };
 
+  if (selectedDevices.includes('hue')) {
+    config.hue = { ip: null, username: null };
+  }
+  if (selectedDevices.includes('nanoleaf')) {
+    config.nanoleaf = { ip: null, port: null, authToken: null };
+  }
+  if (selectedDevices.includes('airpurifier')) {
+    config.airPurifiers = [];
+  }
+  if (selectedDevices.includes('roomba')) {
+    config.roomba = { ip: null, blid: null, password: null };
+  }
+  if (selectedDevices.includes('homeconnect')) {
+    config.homeConnect = null;
+  }
+
   try {
-    let hueIp = null;
-    let nanoleaf = null;
-    let airPurifiers = [];
-    let roombaIp = null;
-
-    if (resetHue) {
-      try {
-        hueIp = await discoverHueBridge();
-        config.hue.ip = hueIp;
-      } catch (err) {
-        console.log(`Hue Bridge discovery failed: ${err.message}`);
-      }
+    if (selectedDevices.includes('hue')) {
+      await discoverAndConfigureHue(config);
     }
 
-    if (resetNanoleaf) {
-      nanoleaf = await discoverNanoleaf();
-      if (nanoleaf) {
-        config.nanoleaf.ip = nanoleaf.ip;
-        config.nanoleaf.port = nanoleaf.port;
-      }
+    if (selectedDevices.includes('nanoleaf')) {
+      await discoverAndConfigureNanoleaf(config);
     }
 
-    if (resetAirPurifiers) {
-      airPurifiers = await discoverAirPurifiers();
-
-      if (airPurifiers.length === 0) {
-        const manualAdd = readline.keyInYN('\nWould you like to manually enter an air purifier IP address?');
-
-        if (manualAdd) {
-          const ip = readline.question('Enter the IP address: ');
-          if (ip) {
-            airPurifiers.push({ ip, name: `Air Purifier (${ip})` });
-          }
-        }
-      }
-
-      const addMore = airPurifiers.length > 0 && readline.keyInYN('Add another air purifier manually?');
-      if (addMore) {
-        const ip = readline.question('Enter the IP address: ');
-        if (ip) {
-          airPurifiers.push({ ip, name: `Air Purifier (${ip})` });
-        }
-      }
+    if (selectedDevices.includes('airpurifier')) {
+      await discoverAndConfigureAirPurifiers(config);
     }
 
-    if (resetRoomba) {
-      roombaIp = await discoverRoomba();
-
-      if (!roombaIp) {
-        const manualAdd = readline.keyInYN('\nWould you like to manually enter the Roomba IP address?');
-
-        if (manualAdd) {
-          roombaIp = readline.question('Enter the IP address: ');
-        }
-      }
-
-      if (roombaIp) {
-        config.roomba.ip = roombaIp;
-      }
+    if (selectedDevices.includes('roomba')) {
+      await discoverAndConfigureRoomba(config);
     }
 
-    if (!resetHue && !resetNanoleaf && !resetAirPurifiers && !resetRoomba) {
-      console.log('\nNo devices to configure. Exiting.');
-      process.exit(0);
-    }
-
-    // Authenticate devices
-    if (hueIp) {
-      config.hue.username = await authenticateHueBridge(hueIp);
-    }
-
-    if (nanoleaf) {
-      config.nanoleaf.authToken = await authenticateNanoleaf(nanoleaf.ip, nanoleaf.port);
-    }
-
-    for (const purifier of airPurifiers) {
-      const purifierConfig = await configureAirPurifier(purifier.ip);
-      if (purifierConfig) {
-        config.airPurifiers.push(purifierConfig);
-      }
-    }
-
-    if (roombaIp && resetRoomba) {
-      const roombaCredentials = await authenticateRoomba(roombaIp);
-      if (roombaCredentials) {
-        config.roomba.blid = roombaCredentials.blid;
-        config.roomba.password = roombaCredentials.password;
+    if (selectedDevices.includes('homeconnect')) {
+      const homeConnectConfig = configureHomeConnect();
+      if (homeConnectConfig) {
+        config.homeConnect = homeConnectConfig;
       }
     }
 
@@ -511,9 +448,16 @@ async function main() {
 
     if (config.roomba?.password) {
       console.log(`  - Roomba: ${config.roomba.ip}`);
+    } else if (config.roomba?.ip) {
+      console.log(`  - Roomba: ${config.roomba.ip} (authentication pending)`);
+    }
+
+    if (config.homeConnect?.clientId) {
+      console.log('  - Home Connect: Configured (requires web authentication)');
     }
 
     console.log('\nYou can now start the web server with: npm start');
+    process.exit(0);
   } catch (err) {
     console.error(`\nError: ${err.message}`);
     process.exit(1);
