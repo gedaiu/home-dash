@@ -1,7 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const CONFIG_FILE = path.join(__dirname, '../../network-config.json');
+const isTest = process.env.NODE_ENV === 'test';
+const CONFIG_FILE = path.join(__dirname, isTest ? '../../data/test-config.json' : '../../network-config.json');
 const DATA_DIR = path.join(__dirname, '../../data');
 const SENSORS_DIR = path.join(DATA_DIR, 'sensors');
 const LOGS_DIR = path.join(DATA_DIR, 'logs');
