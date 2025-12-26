@@ -128,6 +128,7 @@ async function poll() {
         state.currentColor = { r: 0, g: 0, b: 0 };
         state.lastLightState = { ...lightState };
         state.fastPollUntil = Date.now() + FAST_POLL_DURATION_MS;
+        storage.logLightChange(config.sync.hueDeviceName, { r: 0, g: 0, b: 0 }, 'off', lightState);
         broadcast('status', getStatus());
       }
       return;
@@ -157,9 +158,11 @@ async function poll() {
         await nanoleafService.createOrUpdateEffect(hue, sat, bri);
         await nanoleafService.selectEffect('HueSync');
         log(`RGB(${rgb.r}, ${rgb.g}, ${rgb.b}) with animation`);
+        storage.logLightChange(config.sync.hueDeviceName, rgb, 'animation', lightState);
       } else {
         await nanoleafService.setColor(hue, sat, bri);
         log(`RGB(${rgb.r}, ${rgb.g}, ${rgb.b}) static`);
+        storage.logLightChange(config.sync.hueDeviceName, rgb, 'static', lightState);
       }
 
       state.currentColor = rgb;

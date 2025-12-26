@@ -4,6 +4,7 @@ const path = require('node:path');
 const CONFIG_FILE = path.join(__dirname, '../../network-config.json');
 const DATA_DIR = path.join(__dirname, '../../data');
 const SENSORS_DIR = path.join(DATA_DIR, 'sensors');
+const LOGS_DIR = path.join(DATA_DIR, 'logs');
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -16,6 +17,30 @@ function ensureSensorsDir() {
   if (!fs.existsSync(SENSORS_DIR)) {
     fs.mkdirSync(SENSORS_DIR, { recursive: true });
   }
+}
+
+function ensureLogsDir() {
+  ensureDataDir();
+  if (!fs.existsSync(LOGS_DIR)) {
+    fs.mkdirSync(LOGS_DIR, { recursive: true });
+  }
+}
+
+function getLogFilePath(date) {
+  return path.join(LOGS_DIR, `${date}_lights.log`);
+}
+
+function logLightChange(lightName, rgb, mode, lightState) {
+  ensureLogsDir();
+  const now = new Date();
+  const date = now.toISOString().split('T')[0];
+  const time = now.toISOString().split('T')[1].replace('Z', '');
+  const filePath = getLogFilePath(date);
+
+  const stateStr = lightState.on ? `bri:${lightState.bri}` : 'OFF';
+  const line = `${time} [${lightName}] RGB(${rgb.r},${rgb.g},${rgb.b}) ${mode} ${stateStr}\n`;
+
+  fs.appendFileSync(filePath, line, 'utf-8');
 }
 
 function getSensorFilePath(date, sensorId) {
@@ -92,6 +117,73 @@ function saveSensorFile(date, sensorId, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
 }
 
+function zigzagEncode(n) {
+  return (n << 1) ^ (n >> 31);
+}
+
+function zigzagDecode(n) {
+  return (n >>> 1) ^ -(n & 1);
+}
+
+function getMidnightMs(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function encodeHistory(entries, dateStr) {
+  if (!entries || entries.length === 0) {
+    return [];
+  }
+
+  const midnightMs = getMidnightMs(dateStr);
+  const encoded = [];
+  let prevTime = 0;
+  let prevValue = null;
+
+  for (const entry of entries) {
+    if (prevValue === null || entry.v !== prevValue) {
+      const secSinceMidnight = Math.floor((entry.t - midnightMs) / 1000);
+      const timeDelta = prevTime === 0 ? secSinceMidnight : secSinceMidnight - prevTime;
+      const valueDelta = prevValue === null ? entry.v : entry.v - prevValue;
+
+      encoded.push(zigzagEncode(timeDelta));
+      encoded.push(zigzagEncode(Math.round(valueDelta * 100)));
+
+      prevTime = secSinceMidnight;
+      prevValue = entry.v;
+    }
+  }
+
+  return encoded;
+}
+
+function decodeHistory(encoded, dateStr) {
+  if (!encoded || encoded.length === 0) {
+    return [];
+  }
+
+  const midnightMs = getMidnightMs(dateStr);
+  const entries = [];
+  let currentTime = 0;
+  let currentValue = 0;
+
+  for (let i = 0; i < encoded.length; i += 2) {
+    const timeDelta = zigzagDecode(encoded[i]);
+    const valueDelta = zigzagDecode(encoded[i + 1]) / 100;
+
+    currentTime += timeDelta;
+    currentValue = entries.length === 0 ? valueDelta : currentValue + valueDelta;
+
+    entries.push({
+      t: midnightMs + currentTime * 1000,
+      v: currentValue
+    });
+  }
+
+  return entries;
+}
+
 function loadSensorData() {
   ensureSensorsDir();
   const today = new Date().toISOString().split('T')[0];
@@ -115,7 +207,9 @@ function loadSensorData() {
       const filePath = path.join(SENSORS_DIR, file);
       const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
 
-      if (data.history) {
+      if (data.h) {
+        result.history[sensorId] = decodeHistory(data.h, today);
+      } else if (data.history) {
         result.history[sensorId] = data.history;
       }
 
@@ -138,7 +232,7 @@ function saveSensorData(history, dailyStats) {
 
   for (const sensorId of sensorIds) {
     const data = {
-      history: history[sensorId] || [],
+      h: encodeHistory(history[sensorId] || [], today),
       dailyStats: dailyStats[sensorId] || null
     };
     saveSensorFile(today, sensorId, data);
@@ -155,5 +249,11 @@ module.exports = {
   getSync,
   setSync,
   loadSensorData,
-  saveSensorData
+  saveSensorData,
+  logLightChange,
+  zigzagEncode,
+  zigzagDecode,
+  encodeHistory,
+  decodeHistory,
+  getMidnightMs
 };

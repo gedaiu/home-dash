@@ -139,6 +139,14 @@ describe('getLightRgb', () => {
     const result = getLightRgb({ on: true, colormode: 'hs', hue: 0, sat: 254, bri: 254 });
     expect(result.r).toBeGreaterThan(200);
   });
+
+  test('returns grayscale when no colormode specified', () => {
+    const result = getLightRgb({ on: true, bri: 127 });
+    expect(result.r).toBe(result.g);
+    expect(result.g).toBe(result.b);
+    expect(result.r).toBeGreaterThan(100);
+    expect(result.r).toBeLessThan(140);
+  });
 });
 
 describe('stateChanged', () => {

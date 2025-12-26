@@ -155,6 +155,47 @@ Connect to `ws://localhost:3000` for real-time updates:
 - `ping` - Keep-alive (responds with `pong`)
 - `subscribe` - Request current status
 
+## Sensor Data Storage
+
+Sensor history is stored in `data/sensors/` with one file per sensor per day:
+```
+data/sensors/{YYYY-MM-DD}_{sensorUniqueId}.json
+```
+
+### Compact Encoding Format
+
+To minimize storage, sensor history uses a space-efficient delta encoding:
+
+```json
+{
+  "h": [7200, 4814, 600, -22, 300, 0],
+  "dailyStats": { "date": "2025-12-26", "min": 23.96, "max": 24.07 }
+}
+```
+
+The `h` array contains pairs of zigzag-encoded values: `[timeDelta, valueDelta, ...]`
+
+**Decoding:**
+1. **Time**: Cumulative seconds since midnight (zigzag decoded)
+2. **Value**: Cumulative value in centiunits (zigzag decoded, divide by 100)
+
+**Example decoding `[7200, 4814, 600, -22]`:**
+```
+Entry 1: time = zigzag(7200) = 3600s (01:00:00), value = zigzag(4814)/100 = 24.07
+Entry 2: time = 3600 + zigzag(600) = 3900s (01:05:00), value = 24.07 + zigzag(-22)/100 = 23.96
+```
+
+**Zigzag encoding:**
+- Encodes signed integers as unsigned: `(n << 1) ^ (n >> 31)`
+- Small negative numbers become small positive numbers
+- Decode: `(n >>> 1) ^ -(n & 1)`
+
+**Space savings:**
+- Only stores entries when value changes (not every poll)
+- Timestamps as seconds-since-midnight deltas (small numbers)
+- Values as deltas from previous (typically small changes)
+- Flat array instead of nested objects
+
 ## License
 
 MIT

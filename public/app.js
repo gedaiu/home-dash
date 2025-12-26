@@ -557,7 +557,7 @@ async function loadRooms() {
             <div class="lights-list">
               ${showNanoleaf ? renderNanoleafItem() : ''}
               ${room.lights.map(light => {
-                const isSelected = light.id === selectedLightId;
+                const isSelected = String(light.id) === String(selectedLightId);
                 const isOn = light.state.on && light.state.reachable !== false;
                 const isOffline = light.state.reachable === false;
                 const color = getLightColor(light.state);
@@ -667,7 +667,7 @@ function populateLightSelect() {
       const option = document.createElement('option');
       option.value = light.id;
       option.textContent = light.name;
-      if (light.id === selectedLightId) {
+      if (String(light.id) === String(selectedLightId)) {
         option.selected = true;
       }
       optgroup.appendChild(option);
@@ -724,7 +724,7 @@ async function onSourceSelectChange(e) {
   selectedLightId = id;
 
   $$('.light-item').forEach(item => {
-    item.classList.toggle('selected', parseInt(item.dataset.id, 10) === id);
+    item.classList.toggle('selected', String(item.dataset.id) === String(id));
   });
 
   await API.sync.setConfig({ hueDeviceId: id, hueDeviceName: light.name });

@@ -6,11 +6,18 @@ const DEVICE_NAME = 'web-server';
 
 let cachedApi = null;
 
-const HISTORY_LENGTH = 20;
+const DISPLAY_HISTORY_LENGTH = 20;
 
 const savedData = storage.loadSensorData();
 const sensorHistory = savedData.history || {};
 const sensorDailyStats = savedData.dailyStats || {};
+const displayHistory = {};
+
+for (const [sensorId, entries] of Object.entries(sensorHistory)) {
+  if (entries && entries.length > 0) {
+    displayHistory[sensorId] = entries.slice(-DISPLAY_HISTORY_LENGTH).map(e => e.v);
+  }
+}
 
 let saveTimeout = null;
 
@@ -41,7 +48,20 @@ function updateSensorHistory(sensorId, category, state) {
   }
 
   if (value === null) {
-    return { history: sensorHistory[sensorId] || [], dailyStats: null };
+    return {
+      history: displayHistory[sensorId] || [],
+      dailyStats: null
+    };
+  }
+
+  if (!displayHistory[sensorId]) {
+    displayHistory[sensorId] = [];
+  }
+
+  displayHistory[sensorId].push(value);
+
+  if (displayHistory[sensorId].length > DISPLAY_HISTORY_LENGTH) {
+    displayHistory[sensorId].shift();
   }
 
   if (!sensorHistory[sensorId]) {
@@ -49,10 +69,12 @@ function updateSensorHistory(sensorId, category, state) {
   }
 
   const history = sensorHistory[sensorId];
-  history.push(value);
+  const lastEntry = history[history.length - 1];
+  const now = Date.now();
 
-  if (history.length > HISTORY_LENGTH) {
-    history.shift();
+  if (!lastEntry || lastEntry.v !== value) {
+    history.push({ t: now, v: value });
+    scheduleSave();
   }
 
   let dailyStats = null;
@@ -77,9 +99,7 @@ function updateSensorHistory(sensorId, category, state) {
     };
   }
 
-  scheduleSave();
-
-  return { history, dailyStats };
+  return { history: displayHistory[sensorId], dailyStats };
 }
 
 async function discover() {
@@ -265,8 +285,9 @@ async function getSensors() {
       const sensorId = sensorData.id || data.id;
       const sensorName = sensorData.name || data.name;
       const sensorModelid = sensorData.modelid || data.modelid;
+      const sensorUniqueid = sensorData.uniqueid || data.uniqueid || '';
       const category = getSensorCategory(sensorType);
-      const fullId = `sensor-${sensorId}`;
+      const storageId = sensorUniqueid ? sensorUniqueid.replace(/[^a-zA-Z0-9]/g, '') : `sensor-${sensorId}`;
 
       const sensorState = {
         on: state.presence || state.buttonevent !== undefined || false,
@@ -277,10 +298,10 @@ async function getSensors() {
         lastupdated: state.lastupdated
       };
 
-      const { history, dailyStats } = updateSensorHistory(fullId, category, sensorState);
+      const { history, dailyStats } = updateSensorHistory(storageId, category, sensorState);
 
       return {
-        id: fullId,
+        id: storageId,
         sensorId: sensorId,
         name: sensorName,
         type: sensorType,
@@ -402,5 +423,7 @@ module.exports = {
   getLight,
   remove,
   getApi,
-  resetApi
+  resetApi,
+  getDeviceCategory,
+  getSensorCategory
 };
