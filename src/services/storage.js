@@ -50,14 +50,18 @@ function getSensorFilePath(date, sensorId) {
 
 function load() {
   if (!fs.existsSync(CONFIG_FILE)) {
-    return { hue: null, nanoleaf: null, sync: null };
+    return { hue: null, nanoleaf: null, sync: null, airPurifiers: [] };
   }
 
   try {
     const data = fs.readFileSync(CONFIG_FILE, 'utf-8');
-    return JSON.parse(data);
+    const config = JSON.parse(data);
+    if (!config.airPurifiers) {
+      config.airPurifiers = [];
+    }
+    return config;
   } catch {
-    return { hue: null, nanoleaf: null, sync: null };
+    return { hue: null, nanoleaf: null, sync: null, airPurifiers: [] };
   }
 }
 
@@ -92,6 +96,44 @@ function getSync() {
 function setSync(syncConfig) {
   const config = load();
   config.sync = syncConfig;
+  save(config);
+}
+
+function getAirPurifiers() {
+  return load().airPurifiers || [];
+}
+
+function getAirPurifier(id) {
+  const purifiers = getAirPurifiers();
+  return purifiers.find(p => p.id === id) || null;
+}
+
+function addAirPurifier(purifierConfig) {
+  const config = load();
+  const existing = config.airPurifiers.findIndex(p => p.id === purifierConfig.id);
+
+  if (existing >= 0) {
+    config.airPurifiers[existing] = purifierConfig;
+  } else {
+    config.airPurifiers.push(purifierConfig);
+  }
+
+  save(config);
+}
+
+function updateAirPurifier(id, updates) {
+  const config = load();
+  const index = config.airPurifiers.findIndex(p => p.id === id);
+
+  if (index >= 0) {
+    config.airPurifiers[index] = { ...config.airPurifiers[index], ...updates };
+    save(config);
+  }
+}
+
+function removeAirPurifier(id) {
+  const config = load();
+  config.airPurifiers = config.airPurifiers.filter(p => p.id !== id);
   save(config);
 }
 
@@ -248,6 +290,11 @@ module.exports = {
   setNanoleaf,
   getSync,
   setSync,
+  getAirPurifiers,
+  getAirPurifier,
+  addAirPurifier,
+  updateAirPurifier,
+  removeAirPurifier,
   loadSensorData,
   saveSensorData,
   logLightChange,

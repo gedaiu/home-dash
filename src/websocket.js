@@ -1,5 +1,7 @@
 const WebSocket = require('ws');
 const syncService = require('./services/sync');
+const hueService = require('./services/hue');
+const airpurifierService = require('./services/airpurifier');
 
 let wss = null;
 const clients = new Set();
@@ -34,6 +36,10 @@ function init(server) {
   });
 
   syncService.setBroadcast(broadcast);
+  hueService.setBroadcast(broadcast);
+  airpurifierService.setBroadcast(broadcast);
+  hueService.startPolling();
+  airpurifierService.startPolling();
 }
 
 function handleMessage(ws, data) {

@@ -10,12 +10,18 @@ router.get('/config', (req, res) => {
 
 router.put('/config', (req, res) => {
   const { hueDeviceId, hueDeviceName } = req.body;
+  const currentConfig = syncService.getConfig() || {};
+
+  if (currentConfig.allowChange === false) {
+    return res.status(403).json({ error: 'Config changes are locked' });
+  }
 
   if (!hueDeviceId) {
     return res.status(400).json({ error: 'hueDeviceId required' });
   }
 
   syncService.setConfig({
+    ...currentConfig,
     hueDeviceId,
     hueDeviceName: hueDeviceName || `Light ${hueDeviceId}`
   });

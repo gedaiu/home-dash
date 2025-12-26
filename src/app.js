@@ -3,6 +3,7 @@ const path = require('node:path');
 const hueRoutes = require('./routes/hue');
 const nanoleafRoutes = require('./routes/nanoleaf');
 const syncRoutes = require('./routes/sync');
+const airpurifierRoutes = require('./routes/airpurifier');
 
 const app = express();
 
@@ -12,6 +13,7 @@ app.use(express.static(path.join(__dirname, '../public')));
 app.use('/api/hue', hueRoutes);
 app.use('/api/nanoleaf', nanoleafRoutes);
 app.use('/api/sync', syncRoutes);
+app.use('/api/airpurifier', airpurifierRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err.stack);

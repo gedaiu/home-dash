@@ -5,8 +5,11 @@ const APP_NAME = 'hue-nanoleaf-sync';
 const DEVICE_NAME = 'web-server';
 
 let cachedApi = null;
+let broadcastFn = null;
+let pollTimer = null;
 
-const DISPLAY_HISTORY_LENGTH = 20;
+const DISPLAY_HISTORY_LENGTH = 2880;
+const POLL_INTERVAL_MS = 5000;
 
 const savedData = storage.loadSensorData();
 const sensorHistory = savedData.history || {};
@@ -414,6 +417,41 @@ function remove() {
   resetApi();
 }
 
+function setBroadcast(fn) {
+  broadcastFn = fn;
+}
+
+function broadcast(type, data) {
+  if (broadcastFn) {
+    broadcastFn({ type, data });
+  }
+}
+
+async function pollRooms() {
+  try {
+    const rooms = await getRooms();
+    broadcast('rooms', rooms);
+  } catch {
+    // Ignore polling errors
+  }
+}
+
+function startPolling() {
+  if (pollTimer) {
+    return;
+  }
+
+  pollTimer = setInterval(pollRooms, POLL_INTERVAL_MS);
+  pollRooms();
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
 module.exports = {
   discover,
   pair,
@@ -425,5 +463,8 @@ module.exports = {
   getApi,
   resetApi,
   getDeviceCategory,
-  getSensorCategory
+  getSensorCategory,
+  setBroadcast,
+  startPolling,
+  stopPolling
 };

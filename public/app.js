@@ -37,6 +37,21 @@ const API = {
     start: () => fetch('/api/sync/start', { method: 'POST' }).then(r => r.json()),
     stop: () => fetch('/api/sync/stop', { method: 'POST' }).then(r => r.json()),
     status: () => fetch('/api/sync/status').then(r => r.json())
+  },
+  airpurifier: {
+    discover: () => fetch('/api/airpurifier/discover').then(r => r.json()),
+    devices: () => fetch('/api/airpurifier/devices').then(r => r.json()),
+    pair: (ip) => fetch('/api/airpurifier/devices/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip })
+    }).then(r => r.json()),
+    remove: (id) => fetch(`/api/airpurifier/devices/${id}`, { method: 'DELETE' }).then(r => r.json()),
+    setPower: (id, on) => fetch(`/api/airpurifier/devices/${id}/power`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ on })
+    }).then(r => r.json())
   }
 };
 
@@ -142,11 +157,13 @@ const ROOM_ICONS = {
 let ws = null;
 let syncConfig = null;
 let selectedLightId = null;
+let configLocked = false;
 let allRooms = [];
 let allLights = [];
 let nanoleafDevice = null;
 let nanoleafConfig = null;
-const HISTORY_LENGTH = 20;
+let airPurifiers = [];
+const HISTORY_LENGTH = 2880;
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -219,6 +236,12 @@ function handleWebSocketMessage(msg) {
       break;
     case 'config':
       loadSyncConfig();
+      break;
+    case 'rooms':
+      updateRooms(msg.data);
+      break;
+    case 'airpurifiers':
+      updateAirPurifiers(msg.data);
       break;
   }
 }
@@ -367,6 +390,122 @@ async function loadNanoleaf() {
   } catch (err) {
     content.innerHTML = `<div class="loading error">Error: ${err.message}</div>`;
   }
+}
+
+function getAirQualityLabel(level) {
+  const labels = {
+    'good': 'GOOD',
+    'moderate': 'MODERATE',
+    'unhealthy-sensitive': 'SENSITIVE',
+    'unhealthy': 'UNHEALTHY',
+    'very-unhealthy': 'VERY UNHEALTHY',
+    'hazardous': 'HAZARDOUS'
+  };
+  return labels[level] || 'UNKNOWN';
+}
+
+function renderAirPurifier(purifier) {
+  if (purifier.offline) {
+    return `
+      <div class="purifier-item offline" data-id="${purifier.id}">
+        <div class="purifier-header">
+          <i data-lucide="wind"></i>
+          <span class="purifier-name">${purifier.name}</span>
+          <span class="status-badge offline">OFFLINE</span>
+        </div>
+      </div>
+    `;
+  }
+
+  const aqColor = purifier.airQuality?.color || '#666';
+  const aqLevel = purifier.airQuality?.level || 'unknown';
+  const pm25Display = purifier.pm25 !== null ? purifier.pm25 : '--';
+
+  return `
+    <div class="purifier-item ${purifier.power ? 'on' : 'off'}" data-id="${purifier.id}">
+      <div class="purifier-header">
+        <i data-lucide="wind"></i>
+        <span class="purifier-name">${purifier.name}</span>
+        <span class="status-badge ${purifier.power ? 'online' : 'offline'}">
+          ${purifier.power ? 'ON' : 'OFF'}
+        </span>
+      </div>
+      <div class="purifier-stats">
+        <div class="purifier-stat main">
+          <span class="stat-value" style="color: ${aqColor}">${pm25Display}</span>
+          <span class="stat-label">PM2.5</span>
+          <span class="stat-quality" style="background: ${aqColor}">${getAirQualityLabel(aqLevel)}</span>
+        </div>
+        ${purifier.humidity !== null ? `
+          <div class="purifier-stat">
+            <i data-lucide="droplets"></i>
+            <span class="stat-value">${purifier.humidity}%</span>
+          </div>
+        ` : ''}
+        ${purifier.temperature !== null ? `
+          <div class="purifier-stat">
+            <i data-lucide="thermometer"></i>
+            <span class="stat-value">${purifier.temperature}°C</span>
+          </div>
+        ` : ''}
+        ${purifier.fanSpeed ? `
+          <div class="purifier-stat">
+            <i data-lucide="gauge"></i>
+            <span class="stat-value">${purifier.fanSpeed}</span>
+          </div>
+        ` : ''}
+      </div>
+    </div>
+  `;
+}
+
+async function loadAirPurifiers() {
+  const content = $('#airpurifier-content');
+
+  try {
+    const devices = await API.airpurifier.devices();
+    airPurifiers = devices;
+
+    if (devices.length === 0) {
+      content.innerHTML = `
+        <div class="device-info">
+          <div class="info-row">
+            <span class="label">STATUS:</span>
+            <span class="status-badge offline">NO DEVICES</span>
+          </div>
+          <p style="margin-top: 12px; color: var(--text-dim)">
+            Click the search icon to discover air purifiers
+          </p>
+        </div>
+      `;
+      return;
+    }
+
+    content.innerHTML = `
+      <div class="purifier-list">
+        ${devices.map(p => renderAirPurifier(p)).join('')}
+      </div>
+    `;
+    lucide.createIcons();
+  } catch (err) {
+    content.innerHTML = `<div class="loading error">Error: ${err.message}</div>`;
+  }
+}
+
+function updateAirPurifiers(devices) {
+  airPurifiers = devices;
+  const content = $('#airpurifier-content');
+
+  if (devices.length === 0) {
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="purifier-list">
+      ${devices.map(p => renderAirPurifier(p)).join('')}
+    </div>
+  `;
+  lucide.createIcons();
 }
 
 function getDeviceIcon(category, archetype) {
@@ -594,6 +733,51 @@ async function loadRooms() {
   }
 }
 
+function updateRooms(rooms) {
+  if (!rooms || rooms.length === 0) {
+    return;
+  }
+
+  allRooms = rooms;
+  allLights = rooms.flatMap(r => r.lights);
+
+  const sensorsRoom = rooms.find(r => r.id === 'sensors');
+  if (sensorsRoom) {
+    $('#sensors-content').innerHTML = renderSensorPanels(sensorsRoom.lights);
+  }
+
+  rooms.filter(r => r.id !== 'sensors').forEach(room => {
+    room.lights.forEach(light => {
+      const el = $(`.light-item[data-id="${light.id}"]`);
+      if (!el) {
+        return;
+      }
+
+      const isOn = light.state.on && light.state.reachable !== false;
+      const isOffline = light.state.reachable === false;
+      const color = getLightColor(light.state);
+      const stateText = getStateText(light);
+
+      el.classList.toggle('offline', isOffline);
+      const indicator = el.querySelector('.light-indicator');
+      if (indicator) {
+        indicator.classList.toggle('on', isOn);
+        indicator.style.backgroundColor = color;
+      }
+      const icon = el.querySelector('.device-icon');
+      if (icon) {
+        icon.classList.toggle('on', isOn);
+      }
+      const stateEl = el.querySelector('.light-state');
+      if (stateEl) {
+        stateEl.textContent = stateText;
+      }
+    });
+  });
+
+  lucide.createIcons();
+}
+
 function getStateText(light) {
   if (light.isSensor) {
     if (light.state.temperature !== undefined) {
@@ -682,6 +866,11 @@ function populateLightSelect() {
 }
 
 async function selectLight(el) {
+  if (configLocked) {
+    log('Config is locked', 'error');
+    return;
+  }
+
   const id = parseInt(el.dataset.id, 10);
   const name = el.dataset.name;
   const category = el.dataset.category;
@@ -734,10 +923,13 @@ async function onSourceSelectChange(e) {
 async function loadSyncConfig() {
   try {
     syncConfig = await API.sync.config();
-    if (syncConfig.hueDeviceId) {
-      selectedLightId = syncConfig.hueDeviceId;
-      const select = $('#sync-source-select');
-      if (select) {
+    configLocked = syncConfig.allowChange === false;
+
+    const select = $('#sync-source-select');
+    if (select) {
+      select.disabled = configLocked;
+      if (syncConfig.hueDeviceId) {
+        selectedLightId = syncConfig.hueDeviceId;
         select.value = syncConfig.hueDeviceId;
       }
     }
@@ -915,6 +1107,75 @@ async function confirmPairNanoleaf(ip, port) {
   }
 }
 
+async function discoverAirPurifier() {
+  showModal('DISCOVERING AIR PURIFIERS', '<div class="loading">Scanning network (10 seconds)...</div>');
+  log('Scanning for air purifiers...');
+
+  try {
+    const devices = await API.airpurifier.discover();
+
+    showModal('ADD AIR PURIFIER', `
+      <p style="margin-bottom: 12px; color: var(--text-dim)">
+        Enter the IP address of your Philips air purifier:
+      </p>
+      <div class="input-row">
+        <input type="text" id="purifier-ip" placeholder="192.168.1.xxx" class="modal-input">
+      </div>
+      ${devices.length > 0 ? `
+        <p style="margin-top: 16px; margin-bottom: 8px">Or select a discovered device:</p>
+        <div class="device-list">
+          ${devices.map(d => `
+            <div class="device-item" onclick="pairAirPurifier('${d.ip}')">
+              <i data-lucide="wind"></i>
+              <span class="name">${d.name}</span>
+              <span class="ip">${d.ip}</span>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+    `, `
+      <button class="btn" onclick="hideModal()">CANCEL</button>
+      <button class="btn btn-start" onclick="pairAirPurifierFromInput()">CONNECT</button>
+    `);
+    lucide.createIcons();
+  } catch (err) {
+    showModal('ERROR', `<p class="error">${err.message}</p>`,
+      '<button class="btn" onclick="hideModal()">CLOSE</button>');
+  }
+}
+
+function pairAirPurifierFromInput() {
+  const ip = $('#purifier-ip').value.trim();
+  if (ip) {
+    pairAirPurifier(ip);
+  }
+}
+
+async function pairAirPurifier(ip) {
+  showModal('CONNECTING...', '<div class="loading">Connecting to air purifier...</div>');
+
+  try {
+    const result = await API.airpurifier.pair(ip);
+
+    if (result.success) {
+      hideModal();
+      log(`Air purifier paired: ${result.config.name}`, 'success');
+      await loadAirPurifiers();
+    } else {
+      showModal('CONNECTION FAILED', `
+        <p class="error">${result.error}</p>
+        <p style="margin-top: 12px">Make sure the purifier is on the same network and powered on.</p>
+      `, `
+        <button class="btn" onclick="hideModal()">CANCEL</button>
+        <button class="btn btn-start" onclick="discoverAirPurifier()">RETRY</button>
+      `);
+    }
+  } catch (err) {
+    showModal('ERROR', `<p class="error">${err.message}</p>`,
+      '<button class="btn" onclick="hideModal()">CLOSE</button>');
+  }
+}
+
 async function init() {
   lucide.createIcons();
   updateClock();
@@ -926,11 +1187,13 @@ async function init() {
   await Promise.all([
     loadHueBridge(),
     loadNanoleaf(),
+    loadAirPurifiers(),
     loadRooms()
   ]);
 
   $('#discover-hue').addEventListener('click', discoverHue);
   $('#discover-nanoleaf').addEventListener('click', discoverNanoleaf);
+  $('#discover-airpurifier').addEventListener('click', discoverAirPurifier);
   $('#modal-close').addEventListener('click', hideModal);
   $('#sync-source-select').addEventListener('change', onSourceSelectChange);
 
@@ -983,5 +1246,8 @@ window.pairHue = pairHue;
 window.confirmPairHue = confirmPairHue;
 window.pairNanoleaf = pairNanoleaf;
 window.confirmPairNanoleaf = confirmPairNanoleaf;
+window.pairAirPurifier = pairAirPurifier;
+window.pairAirPurifierFromInput = pairAirPurifierFromInput;
+window.discoverAirPurifier = discoverAirPurifier;
 
 document.addEventListener('DOMContentLoaded', init);

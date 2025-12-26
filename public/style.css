@@ -136,7 +136,7 @@ body {
 
 .panel-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
 }
 
@@ -851,6 +851,122 @@ select optgroup {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-dim);
+}
+
+/* Air Purifier Styles */
+.purifier-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.purifier-item {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 10px;
+}
+
+.purifier-item.on {
+  border-color: #00ff88;
+}
+
+.purifier-item.offline {
+  opacity: 0.6;
+}
+
+.purifier-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.purifier-header i {
+  width: 16px;
+  height: 16px;
+}
+
+.purifier-name {
+  flex: 1;
+  font-size: 14px;
+}
+
+.purifier-stats {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.purifier-stat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.purifier-stat i {
+  width: 14px;
+  height: 14px;
+  color: var(--text-dim);
+}
+
+.purifier-stat.main {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.purifier-stat.main .stat-value {
+  font-size: 28px;
+  line-height: 1;
+  text-shadow: 0 0 10px currentColor;
+}
+
+.purifier-stat .stat-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.purifier-stat .stat-quality {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  color: #000;
+  font-weight: bold;
+}
+
+.modal-input {
+  width: 100%;
+  font-family: 'VT323', monospace;
+  font-size: 18px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  outline: none;
+}
+
+.modal-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 4px var(--accent);
+}
+
+.modal-input::placeholder {
+  color: var(--text-dim);
+}
+
+.input-row {
+  margin-bottom: 12px;
+}
+
+@media (max-width: 1024px) {
+  .panel-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 @media (max-width: 768px) {

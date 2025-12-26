@@ -115,7 +115,11 @@ async function poll() {
     const light = await hueService.getLight(config.sync.hueDeviceId);
 
     if (!light) {
-      throw new Error('Could not get light state');
+      const hueConfig = config.hue;
+      if (!hueConfig?.ip || !hueConfig?.username) {
+        throw new Error('Hue Bridge not configured');
+      }
+      throw new Error(`Light ${config.sync.hueDeviceId} not found or unreachable`);
     }
 
     const lightState = light.state;

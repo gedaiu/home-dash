@@ -61,6 +61,12 @@ describe('POST /api/nanoleaf/device/pair', () => {
 });
 
 describe('PUT /api/sync/config', () => {
+  const storage = require('../../src/services/storage');
+
+  beforeEach(() => {
+    storage.setSync({ hueDeviceId: 1, hueDeviceName: 'Test', allowChange: true });
+  });
+
   test('returns 400 when hueDeviceId is missing', async () => {
     const response = await request(app)
       .put('/api/sync/config')
@@ -77,6 +83,54 @@ describe('PUT /api/sync/config', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
+  });
+
+  test('returns 403 when allowChange is false', async () => {
+    storage.setSync({ hueDeviceId: 1, hueDeviceName: 'Locked Light', allowChange: false });
+
+    const response = await request(app)
+      .put('/api/sync/config')
+      .send({ hueDeviceId: 2, hueDeviceName: 'New Light' });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe('Config changes are locked');
+  });
+
+  test('preserves config when allowChange is false', async () => {
+    storage.setSync({ hueDeviceId: 1, hueDeviceName: 'Locked Light', allowChange: false });
+
+    await request(app)
+      .put('/api/sync/config')
+      .send({ hueDeviceId: 2, hueDeviceName: 'New Light' });
+
+    const config = storage.getSync();
+    expect(config.hueDeviceId).toBe(1);
+    expect(config.hueDeviceName).toBe('Locked Light');
+  });
+
+  test('allows changes when allowChange is true', async () => {
+    storage.setSync({ hueDeviceId: 1, hueDeviceName: 'Old Light', allowChange: true });
+
+    const response = await request(app)
+      .put('/api/sync/config')
+      .send({ hueDeviceId: 2, hueDeviceName: 'New Light' });
+
+    expect(response.status).toBe(200);
+    const config = storage.getSync();
+    expect(config.hueDeviceId).toBe(2);
+    expect(config.hueDeviceName).toBe('New Light');
+  });
+
+  test('allows changes when allowChange is not set', async () => {
+    storage.setSync({ hueDeviceId: 1, hueDeviceName: 'Old Light' });
+
+    const response = await request(app)
+      .put('/api/sync/config')
+      .send({ hueDeviceId: 3, hueDeviceName: 'Another Light' });
+
+    expect(response.status).toBe(200);
+    const config = storage.getSync();
+    expect(config.hueDeviceId).toBe(3);
   });
 });
 
