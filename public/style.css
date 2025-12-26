@@ -171,6 +171,21 @@ body {
   flex: 1;
 }
 
+.panel-header .header-controls {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.panel-header .header-controls .btn-icon {
+  padding: 4px 6px;
+}
+
+.panel-header .header-controls .btn-icon i {
+  width: 14px;
+  height: 14px;
+}
+
 .panel-content {
   padding: 14px;
   flex: 1;
@@ -478,6 +493,34 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.roomba-section {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.roomba-section .section-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.roomba-details {
+  display: none;
+}
+
+.roomba-details.expanded {
+  display: block;
+}
+
+.btn-icon.active {
+  background: var(--primary);
+  color: var(--bg);
+  border-color: var(--primary);
 }
 
 .sparkline {

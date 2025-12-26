@@ -658,6 +658,87 @@ function renderRoombaPanel(status) {
     `;
   }
 
+  let lifetimeHtml = '';
+  if (status.lifetime) {
+    const totalTime = status.lifetime.totalHours > 0
+      ? `${status.lifetime.totalHours}h ${status.lifetime.totalMinutes}m`
+      : `${status.lifetime.totalMinutes}m`;
+    lifetimeHtml = `
+      <div class="roomba-section">
+        <div class="section-title">LIFETIME STATS</div>
+        <div class="info-row">
+          <span class="label">TOTAL TIME:</span>
+          <span class="value">${totalTime}</span>
+        </div>
+        <div class="info-row">
+          <span class="label">MISSIONS:</span>
+          <span class="value">${status.lifetime.totalMissions} (${status.lifetime.successRate}% success)</span>
+        </div>
+        <div class="info-row">
+          <span class="label">AVG MISSION:</span>
+          <span class="value">${status.lifetime.avgMissionMinutes} min</span>
+        </div>
+      </div>
+    `;
+  }
+
+  let settingsHtml = '';
+  if (status.settings) {
+    const activeSettings = [];
+    if (status.settings.carpetBoost) activeSettings.push('Carpet Boost');
+    if (status.settings.vacHigh) activeSettings.push('High Vacuum');
+    if (status.settings.twoPass) activeSettings.push('Two Pass');
+    if (status.settings.binPause) activeSettings.push('Bin Pause');
+    if (status.settings.ecoCharge) activeSettings.push('Eco Charge');
+
+    settingsHtml = `
+      <div class="roomba-section">
+        <div class="section-title">SETTINGS</div>
+        <div class="info-row">
+          <span class="label">ACTIVE:</span>
+          <span class="value">${activeSettings.length > 0 ? activeSettings.join(', ') : 'Default'}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  let lastCommandHtml = '';
+  if (status.lastCommand?.command) {
+    const cmdTime = status.lastCommand.time
+      ? new Date(status.lastCommand.time).toLocaleString()
+      : 'Unknown';
+    lastCommandHtml = `
+      <div class="roomba-section">
+        <div class="section-title">LAST ACTIVITY</div>
+        <div class="info-row">
+          <span class="label">COMMAND:</span>
+          <span class="value">${status.lastCommand.command} (${status.lastCommand.initiator})</span>
+        </div>
+        <div class="info-row">
+          <span class="label">TIME:</span>
+          <span class="value">${cmdTime}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  let deviceInfoHtml = '';
+  if (status.deviceInfo?.sku) {
+    deviceInfoHtml = `
+      <div class="roomba-section">
+        <div class="section-title">DEVICE INFO</div>
+        <div class="info-row">
+          <span class="label">MODEL:</span>
+          <span class="value">${status.deviceInfo.sku}</span>
+        </div>
+        <div class="info-row">
+          <span class="label">FIRMWARE:</span>
+          <span class="value">${status.deviceInfo.softwareVer || 'Unknown'}</span>
+        </div>
+      </div>
+    `;
+  }
+
   return `
     <div class="device-info">
       <div class="info-row">
@@ -677,6 +758,10 @@ function renderRoombaPanel(status) {
       </div>
       ${binHtml}
       ${controlHtml}
+      ${lifetimeHtml}
+      ${settingsHtml}
+      ${lastCommandHtml}
+      ${deviceInfoHtml}
     </div>
   `;
 }

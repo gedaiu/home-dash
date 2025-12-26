@@ -119,20 +119,31 @@ async function poll() {
       if (!hueConfig?.ip || !hueConfig?.username) {
         throw new Error('Hue Bridge not configured');
       }
-      throw new Error(`Light ${config.sync.hueDeviceId} not found or unreachable`);
+
+      if (!state.nanoleafOff) {
+        log('Hue light unreachable -> Nanoleaf OFF');
+        await nanoleafService.setOn(false);
+        state.nanoleafOff = true;
+        state.currentColor = { r: 0, g: 0, b: 0 };
+        state.lastLightState = null;
+        storage.logLightChange(config.sync.hueDeviceName, { r: 0, g: 0, b: 0 }, 'unreachable', { on: false, bri: 0 });
+        broadcast('status', getStatus());
+      }
+      return;
     }
 
     const lightState = light.state;
 
-    if (!lightState.on) {
+    if (!lightState.on || !lightState.reachable) {
       if (!state.nanoleafOff) {
-        log('Hue light OFF -> Nanoleaf OFF');
+        const reason = !lightState.reachable ? 'unreachable' : 'off';
+        log(`Hue light ${reason} -> Nanoleaf OFF`);
         await nanoleafService.setOn(false);
         state.nanoleafOff = true;
         state.currentColor = { r: 0, g: 0, b: 0 };
         state.lastLightState = { ...lightState };
         state.fastPollUntil = Date.now() + FAST_POLL_DURATION_MS;
-        storage.logLightChange(config.sync.hueDeviceName, { r: 0, g: 0, b: 0 }, 'off', lightState);
+        storage.logLightChange(config.sync.hueDeviceName, { r: 0, g: 0, b: 0 }, reason, lightState);
         broadcast('status', getStatus());
       }
       return;

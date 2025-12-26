@@ -193,6 +193,59 @@ function parseBin(bin) {
   };
 }
 
+function parseLifetimeStats(bbrun, bbmssn) {
+  if (!bbrun && !bbmssn) {
+    return null;
+  }
+
+  const totalMissions = bbmssn?.nMssn || 0;
+  const successfulMissions = bbmssn?.nMssnOk || 0;
+  const successRate = totalMissions > 0 ? Math.round((successfulMissions / totalMissions) * 100) : 0;
+
+  return {
+    totalHours: bbrun?.hr || 0,
+    totalMinutes: bbrun?.min || 0,
+    totalMissions,
+    successfulMissions,
+    failedMissions: bbmssn?.nMssnF || 0,
+    successRate,
+    avgMissionMinutes: bbmssn?.aMssnM || 0
+  };
+}
+
+function parseSettings(state) {
+  return {
+    carpetBoost: state.carpetBoost || false,
+    vacHigh: state.vacHigh || false,
+    twoPass: state.twoPass || false,
+    binPause: state.binPause || false,
+    ecoCharge: state.ecoCharge || false,
+    schedHold: state.schedHold || false
+  };
+}
+
+function parseLastCommand(lastCommand) {
+  if (!lastCommand) {
+    return null;
+  }
+
+  return {
+    command: lastCommand.command || null,
+    initiator: lastCommand.initiator || null,
+    time: lastCommand.time ? new Date(lastCommand.time * 1000).toISOString() : null
+  };
+}
+
+function parseDeviceInfo(state) {
+  return {
+    sku: state.sku || null,
+    softwareVer: state.softwareVer || null,
+    batteryType: state.batteryType || null,
+    country: state.country || null,
+    timezone: state.timezone || null
+  };
+}
+
 async function getStatus() {
   const config = getConfig();
   if (!config || !config.ip || !config.blid || !config.password) {
@@ -224,6 +277,10 @@ async function getStatus() {
     const mission = parseMission(state.cleanMissionStatus);
     const battery = parseBattery(state.batPct);
     const bin = parseBin(state.bin);
+    const lifetime = parseLifetimeStats(state.bbrun, state.bbmssn);
+    const settings = parseSettings(state);
+    const lastCommand = parseLastCommand(state.lastCommand);
+    const deviceInfo = parseDeviceInfo(state);
 
     return {
       name: state.name || config.name || 'Roomba',
@@ -233,7 +290,11 @@ async function getStatus() {
       mission,
       bin,
       dock: state.dock || {},
-      signal: state.signal?.rssi || null
+      signal: state.signal?.rssi || null,
+      lifetime,
+      settings,
+      lastCommand,
+      deviceInfo
     };
   } catch (err) {
     disconnect();
