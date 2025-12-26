@@ -421,5 +421,13 @@ module.exports = {
   dock,
   setBroadcast,
   startPolling,
-  stopPolling
+  stopPolling,
+  // Export parsing functions for testing
+  parseMission,
+  parseBattery,
+  parseBin,
+  parseLifetimeStats,
+  parseSettings,
+  parseLastCommand,
+  parseDeviceInfo
 };

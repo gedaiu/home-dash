@@ -56,6 +56,7 @@ const API = {
   homeconnect: {
     status: () => fetch('/api/homeconnect/status').then(r => r.json()),
     devices: () => fetch('/api/homeconnect/devices').then(r => r.json()),
+    refresh: () => fetch('/api/homeconnect/refresh', { method: 'POST' }).then(r => r.json()),
     authUrl: () => fetch('/api/homeconnect/auth/url').then(r => r.json()),
     configure: (clientId, clientSecret) => fetch('/api/homeconnect/configure', {
       method: 'POST',
@@ -574,6 +575,68 @@ function getRoombaPhaseDisplay(phase) {
   return displays[phase] || { label: phase?.toUpperCase() || 'UNKNOWN', class: 'offline' };
 }
 
+let roombaDetailsExpanded = false;
+
+function renderRoombaHeaderControls(status) {
+  if (!status?.configured || !status?.connected) {
+    return '';
+  }
+
+  const isActive = ['cleaning', 'returning', 'docking', 'emptying'].includes(status.mission?.phase);
+  const isPaused = status.mission?.phase === 'paused';
+  const isCharging = status.mission?.phase === 'charging';
+
+  let controlButtons = '';
+  if (isActive) {
+    controlButtons = `
+      <button class="btn-icon" onclick="pauseRoomba()" title="Pause">
+        <i data-lucide="pause"></i>
+      </button>
+      <button class="btn-icon" onclick="dockRoomba()" title="Dock">
+        <i data-lucide="home"></i>
+      </button>
+    `;
+  } else if (isPaused) {
+    controlButtons = `
+      <button class="btn-icon" onclick="resumeRoomba()" title="Resume">
+        <i data-lucide="play"></i>
+      </button>
+      <button class="btn-icon" onclick="dockRoomba()" title="Dock">
+        <i data-lucide="home"></i>
+      </button>
+    `;
+  } else if (isCharging || status.mission?.phase === 'stopped') {
+    controlButtons = `
+      <button class="btn-icon" onclick="startRoomba()" title="Start Cleaning">
+        <i data-lucide="play"></i>
+      </button>
+    `;
+  }
+
+  const detailsActiveClass = roombaDetailsExpanded ? 'active' : '';
+
+  return `
+    ${controlButtons}
+    <button class="btn-icon ${detailsActiveClass}" onclick="toggleRoombaDetails()" title="Details">
+      <i data-lucide="info"></i>
+    </button>
+  `;
+}
+
+function toggleRoombaDetails() {
+  roombaDetailsExpanded = !roombaDetailsExpanded;
+  const details = document.querySelector('.roomba-details');
+  const btn = document.querySelector('#roomba-controls .btn-icon[title="Details"]');
+
+  if (details) {
+    details.classList.toggle('expanded', roombaDetailsExpanded);
+  }
+
+  if (btn) {
+    btn.classList.toggle('active', roombaDetailsExpanded);
+  }
+}
+
 function renderRoombaPanel(status) {
   if (!status || !status.configured) {
     return `
@@ -617,43 +680,6 @@ function renderRoombaPanel(status) {
       <div class="info-row">
         <span class="label">BIN:</span>
         <span class="status-badge ${binClass}">${binStatus}</span>
-      </div>
-    `;
-  }
-
-  const isActive = ['cleaning', 'returning', 'docking', 'emptying'].includes(status.mission?.phase);
-  const isPaused = status.mission?.phase === 'paused';
-  const isCharging = status.mission?.phase === 'charging';
-
-  let controlHtml = '';
-  if (isActive) {
-    controlHtml = `
-      <div class="roomba-controls">
-        <button class="btn btn-icon" onclick="pauseRoomba()" title="Pause">
-          <i data-lucide="pause"></i>
-        </button>
-        <button class="btn btn-icon" onclick="dockRoomba()" title="Dock">
-          <i data-lucide="home"></i>
-        </button>
-      </div>
-    `;
-  } else if (isPaused) {
-    controlHtml = `
-      <div class="roomba-controls">
-        <button class="btn btn-icon" onclick="resumeRoomba()" title="Resume">
-          <i data-lucide="play"></i>
-        </button>
-        <button class="btn btn-icon" onclick="dockRoomba()" title="Dock">
-          <i data-lucide="home"></i>
-        </button>
-      </div>
-    `;
-  } else if (isCharging || status.mission?.phase === 'stopped') {
-    controlHtml = `
-      <div class="roomba-controls">
-        <button class="btn btn-icon" onclick="startRoomba()" title="Start Cleaning">
-          <i data-lucide="play"></i>
-        </button>
       </div>
     `;
   }
@@ -739,6 +765,8 @@ function renderRoombaPanel(status) {
     `;
   }
 
+  const detailsExpandedClass = roombaDetailsExpanded ? 'expanded' : '';
+
   return `
     <div class="device-info">
       <div class="info-row">
@@ -757,32 +785,39 @@ function renderRoombaPanel(status) {
         </span>
       </div>
       ${binHtml}
-      ${controlHtml}
-      ${lifetimeHtml}
-      ${settingsHtml}
-      ${lastCommandHtml}
-      ${deviceInfoHtml}
+      <div class="roomba-details ${detailsExpandedClass}">
+        ${lifetimeHtml}
+        ${settingsHtml}
+        ${lastCommandHtml}
+        ${deviceInfoHtml}
+      </div>
     </div>
   `;
 }
 
 async function loadRoomba() {
   const content = $('#roomba-content');
+  const controls = $('#roomba-controls');
 
   try {
     const status = await API.roomba.status();
     roombaStatus = status;
     content.innerHTML = renderRoombaPanel(status);
+    controls.innerHTML = renderRoombaHeaderControls(status);
     lucide.createIcons();
   } catch (err) {
     content.innerHTML = `<div class="loading error">Error: ${err.message}</div>`;
+    controls.innerHTML = '';
   }
 }
 
 function updateRoomba(status) {
   roombaStatus = status;
   const content = $('#roomba-content');
-  content.innerHTML = renderRoombaPanel({ configured: true, ...status });
+  const controls = $('#roomba-controls');
+  const fullStatus = { configured: true, ...status };
+  content.innerHTML = renderRoombaPanel(fullStatus);
+  controls.innerHTML = renderRoombaHeaderControls(fullStatus);
   lucide.createIcons();
 }
 
@@ -1059,6 +1094,9 @@ function renderHomeConnectPanel(device) {
       <div class="panel-header">
         <i data-lucide="${icon}"></i>
         <span>${device.name.toUpperCase()}</span>
+        <button class="btn-icon refresh-homeconnect" title="Refresh">
+          <i data-lucide="refresh-cw"></i>
+        </button>
       </div>
       <div class="panel-content">
         ${contentHtml}
@@ -1144,6 +1182,7 @@ async function loadHomeConnect() {
 
     appendToDevicesRow(devices.map(d => renderHomeConnectPanel(d)).join(''));
     lucide.createIcons();
+    attachHomeConnectRefreshHandlers();
   } catch (err) {
     appendToDevicesRow(`
       <section class="panel">
@@ -1170,6 +1209,27 @@ function updateHomeConnect(devices) {
   clearHomeConnectPanels();
   appendToDevicesRow(devices.map(d => renderHomeConnectPanel(d)).join(''));
   lucide.createIcons();
+  attachHomeConnectRefreshHandlers();
+}
+
+async function refreshHomeConnect() {
+  const buttons = $$('.refresh-homeconnect');
+  buttons.forEach(btn => btn.classList.add('spinning'));
+
+  try {
+    const devices = await API.homeconnect.refresh();
+    updateHomeConnect(devices);
+  } catch (err) {
+    console.error('Home Connect refresh error:', err.message);
+  } finally {
+    const updatedButtons = $$('.refresh-homeconnect');
+    updatedButtons.forEach(btn => btn.classList.remove('spinning'));
+  }
+}
+
+function attachHomeConnectRefreshHandlers() {
+  const buttons = $$('.refresh-homeconnect');
+  buttons.forEach(btn => btn.addEventListener('click', refreshHomeConnect));
 }
 
 async function discoverHomeConnect() {
@@ -1353,7 +1413,7 @@ function renderSensorPanel(sensor) {
 
   let bottomContent = renderSparkline(sensor.history, sparklineColor);
   if (sensor.category === 'motion') {
-    const detections = getLastMotionDetections(sensor.history, 5);
+    const detections = getLastMotionDetections(sensor.history, 8);
     if (detections.length > 0) {
       bottomContent = `<div class="motion-detections">${detections.map(d => `<span>${d}</span>`).join('')}</div>`;
     } else if (sensor.state.lastupdated) {

@@ -4,11 +4,13 @@ const API_BASE = 'https://api.home-connect.com';
 const AUTH_URL = 'https://api.home-connect.com/security/oauth/authorize';
 const TOKEN_URL = 'https://api.home-connect.com/security/oauth/token';
 
-const POLL_INTERVAL_MS = 30000;
+const POLL_INTERVAL_MS = 20 * 60 * 1000; // 20 minutes
+const RATE_LIMIT_PAUSE_MS = 60 * 60 * 1000; // 1 hour
 
 let broadcastFn = null;
 let pollTimer = null;
 let cachedAppliances = [];
+let rateLimitedUntil = 0;
 
 function getConfig() {
   return storage.getHomeConnect() || {};
@@ -141,6 +143,10 @@ async function apiRequest(path, options = {}) {
   });
 
   if (!response.ok) {
+    if (response.status === 429) {
+      rateLimitedUntil = Date.now() + RATE_LIMIT_PAUSE_MS;
+      console.error('Home Connect rate limited, pausing for 1 hour');
+    }
     const error = await response.text();
     throw new Error(`API request failed: ${response.status} ${error}`);
   }
@@ -280,54 +286,66 @@ async function getDishwasherStatus(haId) {
   };
 }
 
-async function getAllStatuses() {
+async function fetchStatusesFromApi() {
+  const appliances = cachedAppliances.length > 0 ? cachedAppliances : await getAppliances();
+  const statuses = [];
+
+  for (const appliance of appliances) {
+    try {
+      let status = null;
+
+      if (appliance.type === 'Dishwasher') {
+        status = await getDishwasherStatus(appliance.haId);
+      } else {
+        const statusList = await getApplianceStatus(appliance.haId);
+        status = {};
+        for (const item of statusList) {
+          const key = item.key.split('.').pop();
+          status[key] = item.value;
+        }
+      }
+
+      statuses.push({
+        id: appliance.haId,
+        name: appliance.name,
+        type: appliance.type,
+        brand: appliance.brand,
+        connected: appliance.connected,
+        status
+      });
+    } catch (err) {
+      statuses.push({
+        id: appliance.haId,
+        name: appliance.name,
+        type: appliance.type,
+        brand: appliance.brand,
+        connected: false,
+        error: err.message
+      });
+    }
+  }
+
+  storage.setHomeConnectCache(statuses, Date.now());
+  return statuses;
+}
+
+async function getAllStatuses(forceRefresh = false) {
   if (!isAuthenticated()) {
     return [];
   }
 
   try {
-    const appliances = cachedAppliances.length > 0 ? cachedAppliances : await getAppliances();
-    const statuses = [];
+    const cache = storage.getHomeConnectCache();
 
-    for (const appliance of appliances) {
-      try {
-        let status = null;
-
-        if (appliance.type === 'Dishwasher') {
-          status = await getDishwasherStatus(appliance.haId);
-        } else {
-          const statusList = await getApplianceStatus(appliance.haId);
-          status = {};
-          for (const item of statusList) {
-            const key = item.key.split('.').pop();
-            status[key] = item.value;
-          }
-        }
-
-        statuses.push({
-          id: appliance.haId,
-          name: appliance.name,
-          type: appliance.type,
-          brand: appliance.brand,
-          connected: appliance.connected,
-          status
-        });
-      } catch (err) {
-        statuses.push({
-          id: appliance.haId,
-          name: appliance.name,
-          type: appliance.type,
-          brand: appliance.brand,
-          connected: false,
-          error: err.message
-        });
-      }
+    if (!forceRefresh && cache.statuses.length > 0) {
+      return cache.statuses;
     }
 
-    return statuses;
+    return await fetchStatusesFromApi();
   } catch (err) {
     console.error('Home Connect polling error:', err.message);
-    return [];
+    const cache = storage.getHomeConnectCache();
+    return cache.statuses || [];
   }
 }
 
@@ -342,14 +360,22 @@ function broadcast(type, data) {
 }
 
 async function pollAppliances() {
+  if (Date.now() < rateLimitedUntil) {
+    return;
+  }
+
   try {
-    const statuses = await getAllStatuses();
+    const statuses = await getAllStatuses(true);
     if (statuses.length > 0) {
       broadcast('homeconnect', statuses);
     }
   } catch {
     // Ignore polling errors
   }
+}
+
+async function refreshNow() {
+  return await fetchStatusesFromApi();
 }
 
 function startPolling() {
@@ -394,5 +420,9 @@ module.exports = {
   setBroadcast,
   startPolling,
   stopPolling,
-  disconnect
+  disconnect,
+  refreshNow,
+  parseOperationState,
+  parseDoorState,
+  parseProgramName
 };

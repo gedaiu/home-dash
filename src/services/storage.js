@@ -178,8 +178,35 @@ function getAirPurifiers() {
   return load().airPurifiers || [];
 }
 
+function getDiscoveredAirPurifierIps() {
+  return load().discoveredAirPurifierIps || [];
+}
+
+function setDiscoveredAirPurifierIps(ips) {
+  const config = load();
+  config.discoveredAirPurifierIps = ips;
+  save(config);
+}
+
+function addDiscoveredAirPurifierIp(ip) {
+  const config = load();
+  const ips = config.discoveredAirPurifierIps || [];
+
+  if (!ips.includes(ip)) {
+    ips.push(ip);
+    config.discoveredAirPurifierIps = ips;
+    save(config);
+  }
+}
+
 function getRoomba() {
   return load().roomba || null;
+}
+
+function setRoomba(roombaConfig) {
+  const config = load();
+  config.roomba = roombaConfig;
+  save(config);
 }
 
 function getHomeConnect() {
@@ -204,6 +231,32 @@ function setHomeConnectTokens(tokens) {
   }
   config.homeConnect.tokens = tokens;
   save(config);
+}
+
+function getHomeConnectCacheFile() {
+  return path.join(DATA_DIR, 'homeconnect-cache.json');
+}
+
+function getHomeConnectCache() {
+  ensureDataDir();
+  const cacheFile = getHomeConnectCacheFile();
+
+  if (!fs.existsSync(cacheFile)) {
+    return { statuses: [], lastPollTime: 0 };
+  }
+
+  try {
+    const data = fs.readFileSync(cacheFile, 'utf-8');
+    return JSON.parse(data);
+  } catch {
+    return { statuses: [], lastPollTime: 0 };
+  }
+}
+
+function setHomeConnectCache(statuses, lastPollTime) {
+  ensureDataDir();
+  const cacheFile = getHomeConnectCacheFile();
+  fs.writeFileSync(cacheFile, JSON.stringify({ statuses, lastPollTime }, null, 2), 'utf-8');
 }
 
 function getAirPurifier(id) {
@@ -398,11 +451,17 @@ module.exports = {
   addAirPurifier,
   updateAirPurifier,
   removeAirPurifier,
+  getDiscoveredAirPurifierIps,
+  setDiscoveredAirPurifierIps,
+  addDiscoveredAirPurifierIp,
   getRoomba,
+  setRoomba,
   getHomeConnect,
   setHomeConnect,
   getHomeConnectTokens,
   setHomeConnectTokens,
+  getHomeConnectCache,
+  setHomeConnectCache,
   loadSensorData,
   saveSensorData,
   logLightChange,

@@ -209,5 +209,9 @@ module.exports = {
   getStatus,
   getConfig,
   setConfig,
-  setBroadcast
+  setBroadcast,
+  // Export constants for testing
+  POLL_INTERVAL_SLOW_MS,
+  POLL_INTERVAL_FAST_MS,
+  FAST_POLL_DURATION_MS
 };

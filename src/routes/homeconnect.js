@@ -71,6 +71,14 @@ router.get('/devices', asyncHandler(async (req, res) => {
   res.json(statuses);
 }));
 
+router.post('/refresh', asyncHandler(async (req, res) => {
+  if (!homeconnectService.isAuthenticated()) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+  const statuses = await homeconnectService.refreshNow();
+  res.json(statuses);
+}));
+
 router.delete('/disconnect', (req, res) => {
   homeconnectService.disconnect();
   res.json({ success: true });

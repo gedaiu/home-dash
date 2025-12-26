@@ -479,22 +479,6 @@ body {
   border-radius: 3px;
 }
 
-.roomba-controls {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-
-.roomba-controls .btn-icon {
-  flex: 1;
-  padding: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .roomba-section {
   margin-top: 16px;
   padding-top: 12px;
@@ -808,6 +792,15 @@ select optgroup {
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.btn-icon.spinning i {
+  animation: spin 1s linear infinite;
 }
 
 .modal {

@@ -10,6 +10,12 @@ router.get('/discover', asyncHandler(async (req, res) => {
   res.json(devices);
 }));
 
+router.get('/discover/deep', asyncHandler(async (req, res) => {
+  const subnet = req.query.subnet || '192.168.1';
+  const devices = await airpurifierService.discoverDeep(subnet);
+  res.json(devices);
+}));
+
 router.get('/devices', asyncHandler(async (req, res) => {
   const statuses = await airpurifierService.getAllStatuses();
   res.json(statuses);

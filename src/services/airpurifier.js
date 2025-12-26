@@ -1,9 +1,8 @@
-const { HttpClient, PlainCoapClient, CoapClient } = require('philips-air');
-const dgram = require('node:dgram');
+const { PhilipsCoapClient, PlainCoapClient, HttpClient } = require('../lib/philips-coap');
+const discovery = require('../discovery/airpurifier');
 const storage = require('./storage');
 
-const DISCOVERY_TIMEOUT = 10000;
-const REQUEST_TIMEOUT = 5000;
+const REQUEST_TIMEOUT = 15000;
 
 let broadcastFn = null;
 let pollTimer = null;
@@ -31,67 +30,15 @@ function getAirQualityLevel(pm25) {
 }
 
 async function discover() {
-  return new Promise((resolve) => {
-    const devices = [];
-    const seen = new Set();
+  return discovery.discoverDevices();
+}
 
-    const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
-
-    socket.on('error', () => {
-      socket.close();
-      resolve(devices);
-    });
-
-    socket.on('message', (msg, rinfo) => {
-      const response = msg.toString();
-
-      if (response.includes('philips') || response.includes('Air') || response.includes('Purifier')) {
-        if (!seen.has(rinfo.address)) {
-          seen.add(rinfo.address);
-          devices.push({
-            ip: rinfo.address,
-            name: `Air Purifier (${rinfo.address})`
-          });
-        }
-      }
-    });
-
-    socket.bind(() => {
-      socket.setBroadcast(true);
-
-      const ssdpMessage = Buffer.from(
-        'M-SEARCH * HTTP/1.1\r\n' +
-        'HOST: 239.255.255.250:1900\r\n' +
-        'MAN: "ssdp:discover"\r\n' +
-        'MX: 3\r\n' +
-        'ST: urn:philips-com:device:DiProduct:1\r\n' +
-        '\r\n'
-      );
-
-      socket.send(ssdpMessage, 0, ssdpMessage.length, 1900, '239.255.255.250');
-
-      setTimeout(() => {
-        const ssdpAll = Buffer.from(
-          'M-SEARCH * HTTP/1.1\r\n' +
-          'HOST: 239.255.255.250:1900\r\n' +
-          'MAN: "ssdp:discover"\r\n' +
-          'MX: 3\r\n' +
-          'ST: ssdp:all\r\n' +
-          '\r\n'
-        );
-        socket.send(ssdpAll, 0, ssdpAll.length, 1900, '239.255.255.250');
-      }, 1000);
-    });
-
-    setTimeout(() => {
-      socket.close();
-      resolve(devices);
-    }, DISCOVERY_TIMEOUT);
-  });
+async function discoverDeep(subnet) {
+  return discovery.discoverWithProbe(subnet);
 }
 
 function getClient(config) {
-  const key = `${config.ip}-${config.protocol}`;
+  const key = config.ip + '-' + config.protocol;
 
   if (purifierClients.has(key)) {
     return purifierClients.get(key);
@@ -100,7 +47,7 @@ function getClient(config) {
   let client;
   switch (config.protocol) {
     case 'coap':
-      client = new CoapClient(config.ip, REQUEST_TIMEOUT);
+      client = new PhilipsCoapClient(config.ip, REQUEST_TIMEOUT);
       break;
     case 'plain-coap':
       client = new PlainCoapClient(config.ip, REQUEST_TIMEOUT);
@@ -113,46 +60,151 @@ function getClient(config) {
   return client;
 }
 
-async function testConnection(ip, protocol = 'http') {
-  const config = { ip, protocol };
-
+async function testCoapSyncOnly(ip, verbose = false) {
+  // Test if the device responds to CoAP sync but not status
+  // This indicates a cloud-only device
   try {
-    const client = getClient(config);
-    const status = await client.getStatus();
-    return { success: true, status };
+    const client = new PhilipsCoapClient(ip, REQUEST_TIMEOUT, verbose);
+    const synced = await client.sync();
+
+    if (synced) {
+      if (verbose) {
+        console.log('[airpurifier] CoAP sync succeeded, counter:', client.counter);
+      }
+      return { syncWorks: true, counter: client.counter };
+    }
+    return { syncWorks: false };
   } catch {
-    return { success: false };
+    return { syncWorks: false };
   }
 }
 
-async function pair(ip) {
-  const protocols = ['http', 'plain-coap', 'coap'];
+async function testConnectionWithProtocol(ip, protocol, verbose = false) {
+  try {
+    let client;
+    if (verbose) {
+      console.log('[airpurifier] Trying protocol:', protocol);
+    }
+    switch (protocol) {
+      case 'coap':
+        client = new PhilipsCoapClient(ip, REQUEST_TIMEOUT, verbose);
+        break;
+      case 'plain-coap':
+        client = new PlainCoapClient(ip, REQUEST_TIMEOUT, verbose);
+        break;
+      default:
+        client = new HttpClient(ip, REQUEST_TIMEOUT, verbose);
+    }
+
+    const status = await client.getStatus();
+    if (verbose) {
+      console.log('[airpurifier] Protocol', protocol, 'succeeded');
+    }
+    return { success: true, status, protocol };
+  } catch (err) {
+    if (verbose) {
+      console.log('[airpurifier] Protocol', protocol, 'failed:', err.message);
+    }
+    return { success: false, error: err.message };
+  }
+}
+
+async function testConnection(ip, verbose = false) {
+  const protocols = ['coap', 'plain-coap', 'http'];
 
   for (const protocol of protocols) {
-    const result = await testConnection(ip, protocol);
-
+    if (verbose) {
+      console.log('[airpurifier] Trying protocol:', protocol);
+    }
+    const result = await testConnectionWithProtocol(ip, protocol, verbose);
     if (result.success) {
-      const id = `purifier-${ip.replace(/\./g, '-')}`;
-      const purifierConfig = {
-        id,
-        ip,
-        protocol,
-        name: result.status?.name || `Air Purifier (${ip})`
-      };
-
-      storage.addAirPurifier(purifierConfig);
-
-      return {
-        success: true,
-        config: purifierConfig,
-        status: result.status
-      };
+      return result;
     }
   }
 
+  return { success: false };
+}
+
+async function testConnectionVerbose(ip) {
+  console.log('[airpurifier] Testing connection to', ip, 'with verbose logging');
+  return testConnection(ip, true);
+}
+
+async function probeDevice(ip, verbose = true) {
+  console.log('[airpurifier] Probing device at', ip);
+  const result = await testConnection(ip, verbose);
+
+  if (!result.success) {
+    // Check if device responds to CoAP sync but not status (cloud-only device)
+    if (verbose) {
+      console.log('[airpurifier] All protocols failed, checking for cloud-only device...');
+    }
+
+    const syncResult = await testCoapSyncOnly(ip, verbose);
+    if (syncResult.syncWorks) {
+      console.log('[airpurifier] Device responds to CoAP sync but not status requests');
+      console.log('[airpurifier] This device likely requires cloud control (MQTT)');
+      return {
+        ip,
+        protocol: 'cloud-only',
+        name: 'Air Purifier (' + ip + ')',
+        modelId: null,
+        pm25: null,
+        firmware: null,
+        power: null,
+        cloudOnly: true,
+        rawStatus: null
+      };
+    }
+
+    console.log('[airpurifier] All protocols failed for', ip);
+    return null;
+  }
+
+  const status = result.status || {};
+  const name = status.name || status.DeviceName || status.type || null;
+  const modelId = status.modelid || status.type || status.ProductId || null;
+  const pm25 = status.pm25 ?? status.pm2_5 ?? null;
+  const firmware = status.swversion || status.WifiVersion || null;
+
   return {
-    success: false,
-    error: 'Could not connect using any protocol. Make sure the purifier is on the same network.'
+    ip,
+    protocol: result.protocol,
+    name: name || 'Air Purifier (' + ip + ')',
+    modelId,
+    pm25,
+    firmware,
+    power: status.pwr === '1' || status.pwr === 1 || status.power === 'on',
+    rawStatus: status
+  };
+}
+
+async function pair(ip) {
+  const deviceInfo = await probeDevice(ip);
+
+  if (!deviceInfo) {
+    return {
+      success: false,
+      error: 'Could not connect using any protocol (CoAP encrypted, CoAP plain, HTTP).'
+    };
+  }
+
+  const safeIp = ip.replace(/\./g, '-');
+  const config = {
+    id: 'purifier-' + safeIp,
+    ip,
+    protocol: deviceInfo.protocol,
+    name: deviceInfo.name,
+    model: deviceInfo.modelId
+  };
+
+  storage.addAirPurifier(config);
+
+  return {
+    success: true,
+    config,
+    status: deviceInfo.rawStatus,
+    deviceInfo
   };
 }
 
@@ -174,6 +226,7 @@ async function getStatus(purifierId) {
       name: config.name,
       ip: config.ip,
       protocol: config.protocol,
+      model: config.model,
       power: status.pwr === '1' || status.pwr === 1 || status.power === 'on',
       mode: status.mode || status.om || 'auto',
       fanSpeed: status.om || status.fan_speed || null,
@@ -197,6 +250,7 @@ async function getStatus(purifierId) {
       name: config.name,
       ip: config.ip,
       protocol: config.protocol,
+      model: config.model,
       error: err.message,
       offline: true
     };
@@ -285,7 +339,11 @@ function stopPolling() {
 
 module.exports = {
   discover,
+  discoverDeep,
   pair,
+  probeDevice,
+  testConnection,
+  testConnectionVerbose,
   getStatus,
   getAllStatuses,
   setValues,
