@@ -6,6 +6,82 @@ const DEVICE_NAME = 'web-server';
 
 let cachedApi = null;
 
+const HISTORY_LENGTH = 20;
+
+const savedData = storage.loadSensorData();
+const sensorHistory = savedData.history || {};
+const sensorDailyStats = savedData.dailyStats || {};
+
+let saveTimeout = null;
+
+function scheduleSave() {
+  if (saveTimeout) {
+    return;
+  }
+
+  saveTimeout = setTimeout(() => {
+    storage.saveSensorData(sensorHistory, sensorDailyStats);
+    saveTimeout = null;
+  }, 5000);
+}
+
+function getToday() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function updateSensorHistory(sensorId, category, state) {
+  let value = null;
+
+  if (category === 'temperature' && state.temperature !== undefined) {
+    value = state.temperature;
+  } else if (category === 'motion') {
+    value = state.presence ? 1 : 0;
+  } else if (category === 'lightlevel' && state.lightlevel !== undefined) {
+    value = state.lightlevel;
+  }
+
+  if (value === null) {
+    return { history: sensorHistory[sensorId] || [], dailyStats: null };
+  }
+
+  if (!sensorHistory[sensorId]) {
+    sensorHistory[sensorId] = [];
+  }
+
+  const history = sensorHistory[sensorId];
+  history.push(value);
+
+  if (history.length > HISTORY_LENGTH) {
+    history.shift();
+  }
+
+  let dailyStats = null;
+
+  if (category === 'temperature') {
+    const today = getToday();
+
+    if (!sensorDailyStats[sensorId] || sensorDailyStats[sensorId].date !== today) {
+      sensorDailyStats[sensorId] = {
+        date: today,
+        min: value,
+        max: value
+      };
+    } else {
+      sensorDailyStats[sensorId].min = Math.min(sensorDailyStats[sensorId].min, value);
+      sensorDailyStats[sensorId].max = Math.max(sensorDailyStats[sensorId].max, value);
+    }
+
+    dailyStats = {
+      min: sensorDailyStats[sensorId].min,
+      max: sensorDailyStats[sensorId].max
+    };
+  }
+
+  scheduleSave();
+
+  return { history, dailyStats };
+}
+
 async function discover() {
   let bridges = await discovery.nupnpSearch();
 
@@ -122,13 +198,17 @@ async function getLights() {
   const lights = await hueApi.lights.getAll();
   return lights.map(light => {
     const data = light._data || light;
-    const state = light.state || data.state;
+    const lightData = data.data || data.populationData || data;
+    const state = lightData.state || light.state || data.state;
+    const archetype = lightData.config?.archetype || null;
+
     return {
-      id: data.id,
-      name: data.name,
-      type: data.type,
-      modelid: data.modelid,
-      category: getDeviceCategory(data.type),
+      id: lightData.id || data.id,
+      name: lightData.name || data.name,
+      type: lightData.type || data.type,
+      modelid: lightData.modelid || data.modelid,
+      archetype,
+      category: getDeviceCategory(lightData.type || data.type),
       state: {
         on: state.on,
         bri: state.bri,
@@ -185,23 +265,31 @@ async function getSensors() {
       const sensorId = sensorData.id || data.id;
       const sensorName = sensorData.name || data.name;
       const sensorModelid = sensorData.modelid || data.modelid;
+      const category = getSensorCategory(sensorType);
+      const fullId = `sensor-${sensorId}`;
+
+      const sensorState = {
+        on: state.presence || state.buttonevent !== undefined || false,
+        presence: state.presence,
+        temperature: state.temperature !== undefined ? state.temperature / 100 : undefined,
+        lightlevel: state.lightlevel,
+        buttonevent: state.buttonevent,
+        lastupdated: state.lastupdated
+      };
+
+      const { history, dailyStats } = updateSensorHistory(fullId, category, sensorState);
 
       return {
-        id: `sensor-${sensorId}`,
+        id: fullId,
         sensorId: sensorId,
         name: sensorName,
         type: sensorType,
         modelid: sensorModelid,
-        category: getSensorCategory(sensorType),
+        category,
         isSensor: true,
-        state: {
-          on: state.presence || state.buttonevent !== undefined || false,
-          presence: state.presence,
-          temperature: state.temperature !== undefined ? state.temperature / 100 : undefined,
-          lightlevel: state.lightlevel,
-          buttonevent: state.buttonevent,
-          lastupdated: state.lastupdated
-        }
+        state: sensorState,
+        history,
+        dailyStats
       };
     });
 }
@@ -224,13 +312,19 @@ async function getRooms() {
       })
       .map(group => {
         const data = group._data || group;
-        const roomLights = (data.lights || [])
+        const groupData = data.data || data.populationData || data;
+        const roomLights = (groupData.lights || data.lights || [])
           .map(id => lightMap.get(String(id)))
           .filter(Boolean);
 
+        const roomClass = (groupData.class || 'Other')
+          .toLowerCase()
+          .replace(/\s+/g, '_');
+
         return {
-          id: data.id,
-          name: data.name,
+          id: groupData.id || data.id,
+          name: groupData.name || data.name,
+          class: roomClass,
           lights: roomLights
         };
       });

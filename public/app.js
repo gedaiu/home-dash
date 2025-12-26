@@ -59,6 +59,86 @@ const CATEGORY_ICONS = {
 
 const SYNCABLE_CATEGORIES = ['bulb', 'lamp', 'spot', 'ceiling', 'strip', 'candle'];
 
+const ARCHETYPE_ICONS = {
+  'sultanbulb': 'lightbulb',
+  'classicbulb': 'lightbulb',
+  'vintagebulb': 'lightbulb',
+  'candlebulb': 'lightbulb',
+  'spotbulb': 'circle-dot',
+  'recessedceiling': 'circle-dot',
+  'recessedfloor': 'circle-dot',
+  'pendantround': 'lamp-ceiling',
+  'pendantlong': 'lamp-ceiling',
+  'ceilinghorizontal': 'lamp-ceiling',
+  'ceilingvertical': 'lamp-ceiling',
+  'ceilinground': 'lamp-ceiling',
+  'ceilingsquare': 'lamp-ceiling',
+  'flexiblelamp': 'lamp-desk',
+  'tablelamp': 'lamp-desk',
+  'tableshade': 'lamp-desk',
+  'floorlamp': 'lamp-floor',
+  'floorlantern': 'lamp-floor',
+  'floorshade': 'lamp-floor',
+  'singlespot': 'circle-dot',
+  'doublespot': 'circle-dot',
+  'walllantern': 'lamp-wall-down',
+  'wallshade': 'lamp-wall-down',
+  'wallspot': 'lamp-wall-down',
+  'plug': 'plug',
+  'lightstrip': 'grip-horizontal',
+  'huelightstrip': 'grip-horizontal',
+  'hueplay': 'tv',
+  'huego': 'battery',
+  'huebloom': 'sparkles',
+  'hueiris': 'sparkles',
+  'twilight': 'moon-star',
+  'bollard': 'cylinder',
+  'christmastree': 'tree-pine'
+};
+
+const ROOM_ICONS = {
+  'living_room': 'sofa',
+  'kitchen': 'utensils',
+  'dining': 'utensils-crossed',
+  'bedroom': 'bed-double',
+  'kids_bedroom': 'baby',
+  'bathroom': 'bath',
+  'nursery': 'baby',
+  'recreation': 'gamepad-2',
+  'office': 'briefcase',
+  'gym': 'dumbbell',
+  'hallway': 'door-open',
+  'toilet': 'droplets',
+  'front_door': 'door-closed',
+  'garage': 'warehouse',
+  'terrace': 'trees',
+  'garden': 'flower-2',
+  'driveway': 'car',
+  'carport': 'car',
+  'home': 'home',
+  'downstairs': 'arrow-down',
+  'upstairs': 'arrow-up',
+  'top_floor': 'arrow-up-to-line',
+  'attic': 'triangle',
+  'guest_room': 'bed-single',
+  'staircase': 'stairs',
+  'lounge': 'armchair',
+  'man_cave': 'gamepad-2',
+  'computer': 'monitor',
+  'studio': 'music',
+  'music': 'music-2',
+  'tv': 'tv',
+  'reading': 'book-open',
+  'closet': 'shirt',
+  'storage': 'archive',
+  'laundry_room': 'washing-machine',
+  'balcony': 'fence',
+  'porch': 'lamp',
+  'barbecue': 'flame',
+  'pool': 'waves',
+  'other': 'layout-grid'
+};
+
 let ws = null;
 let syncConfig = null;
 let selectedLightId = null;
@@ -66,6 +146,7 @@ let allRooms = [];
 let allLights = [];
 let nanoleafDevice = null;
 let nanoleafConfig = null;
+const HISTORY_LENGTH = 20;
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -288,8 +369,45 @@ async function loadNanoleaf() {
   }
 }
 
-function getDeviceIcon(category) {
+function getDeviceIcon(category, archetype) {
+  if (archetype && ARCHETYPE_ICONS[archetype]) {
+    return ARCHETYPE_ICONS[archetype];
+  }
   return CATEGORY_ICONS[category] || 'cpu';
+}
+
+function getRoomIcon(roomClass) {
+  return ROOM_ICONS[roomClass] || 'layout-grid';
+}
+
+function renderSparkline(history, color) {
+  if (!history || history.length < 2) {
+    return `
+      <div class="sparkline">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <line x1="0" y1="50" x2="100" y2="50" stroke="#666" stroke-width="2" stroke-dasharray="4,4" vector-effect="non-scaling-stroke" opacity="0.5"/>
+        </svg>
+      </div>
+    `;
+  }
+
+  const min = Math.min(...history);
+  const max = Math.max(...history);
+  const range = max - min || 1;
+
+  const points = history.map((val, i) => {
+    const x = (i / (HISTORY_LENGTH - 1)) * 100;
+    const y = 100 - ((val - min) / range) * 100;
+    return `${x},${y}`;
+  }).join(' ');
+
+  return `
+    <div class="sparkline">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+        <polyline points="${points}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/>
+      </svg>
+    </div>
+  `;
 }
 
 function renderSensorPanel(sensor) {
@@ -298,10 +416,14 @@ function renderSensorPanel(sensor) {
 
   let value = '--';
   let unit = '';
+  let minMax = '';
 
   if (sensor.category === 'temperature' && sensor.state.temperature !== undefined) {
     value = sensor.state.temperature.toFixed(1);
     unit = '°C';
+    if (sensor.dailyStats) {
+      minMax = `<span class="sensor-minmax">${sensor.dailyStats.min.toFixed(1)} / ${sensor.dailyStats.max.toFixed(1)}</span>`;
+    }
   } else if (sensor.category === 'motion') {
     value = sensor.state.presence ? 'DETECTED' : 'CLEAR';
   } else if (sensor.category === 'lightlevel' && sensor.state.lightlevel !== undefined) {
@@ -313,6 +435,14 @@ function renderSensorPanel(sensor) {
 
   const activeClass = (sensor.category === 'motion' && sensor.state.presence) ? 'active' : '';
 
+  const colorMap = {
+    temperature: '#ff6b35',
+    motion: sensor.state.presence ? '#00ff88' : '#00d4ff',
+    lightlevel: '#ffd700',
+    switch: '#b388ff'
+  };
+  const sparklineColor = colorMap[sensor.category] || '#ff8c00';
+
   return `
     <section class="sensor-panel ${typeClass} ${activeClass}">
       <div class="sensor-header">
@@ -320,7 +450,11 @@ function renderSensorPanel(sensor) {
         <span>${sensor.name}</span>
       </div>
       <div class="sensor-content">
-        <span class="sensor-value">${value}<span class="sensor-unit">${unit}</span></span>
+        <div class="sensor-main">
+          <span class="sensor-value">${value}<span class="sensor-unit">${unit}</span></span>
+          ${minMax}
+        </div>
+        ${renderSparkline(sensor.history, sparklineColor)}
       </div>
     </section>
   `;
@@ -408,11 +542,12 @@ async function loadRooms() {
 
     let html = regularRooms.map(room => {
       const showNanoleaf = nanoleafConfig?.roomId?.toLowerCase() === room.name.toLowerCase();
+      const roomIcon = getRoomIcon(room.class);
 
       return `
         <section class="panel room-panel">
           <div class="panel-header">
-            <i data-lucide="layout-grid"></i>
+            <i data-lucide="${roomIcon}"></i>
             <span>${room.name.toUpperCase()}</span>
             <button class="btn-icon refresh-room" title="Refresh">
               <i data-lucide="refresh-cw"></i>
@@ -423,12 +558,13 @@ async function loadRooms() {
               ${showNanoleaf ? renderNanoleafItem() : ''}
               ${room.lights.map(light => {
                 const isSelected = light.id === selectedLightId;
-                const isOn = light.state.on;
+                const isOn = light.state.on && light.state.reachable !== false;
+                const isOffline = light.state.reachable === false;
                 const color = getLightColor(light.state);
-                const icon = getDeviceIcon(light.category);
+                const icon = getDeviceIcon(light.category, light.archetype);
                 const stateText = getStateText(light);
                 return `
-                  <div class="light-item ${isSelected ? 'selected' : ''}"
+                  <div class="light-item ${isSelected ? 'selected' : ''} ${isOffline ? 'offline' : ''}"
                        data-id="${light.id}"
                        data-name="${light.name}"
                        data-category="${light.category}">
@@ -472,6 +608,10 @@ function getStateText(light) {
     return '--';
   }
 
+  if (light.state.reachable === false) {
+    return 'OFFLINE';
+  }
+
   if (!light.state.on) {
     return 'OFF';
   }
@@ -484,7 +624,7 @@ function getStateText(light) {
 }
 
 function getLightColor(state) {
-  if (!state.on) {
+  if (!state.on || state.reachable === false) {
     return '#333';
   }
 
@@ -562,13 +702,22 @@ async function selectLight(el) {
 }
 
 async function onSourceSelectChange(e) {
-  const id = parseInt(e.target.value, 10);
+  const select = e.target;
+  const id = parseInt(select.value, 10);
   if (!id) {
     return;
   }
 
   const light = allLights.find(l => l.id === id);
   if (!light) {
+    return;
+  }
+
+  const previousId = selectedLightId;
+  const confirmed = confirm(`Change sync source to "${light.name}"?`);
+
+  if (!confirmed) {
+    select.value = previousId || '';
     return;
   }
 
@@ -782,7 +931,6 @@ async function init() {
 
   $('#discover-hue').addEventListener('click', discoverHue);
   $('#discover-nanoleaf').addEventListener('click', discoverNanoleaf);
-  $('#refresh-rooms').addEventListener('click', loadRooms);
   $('#modal-close').addEventListener('click', hideModal);
   $('#sync-source-select').addEventListener('change', onSourceSelectChange);
 
