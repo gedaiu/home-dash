@@ -48,6 +48,7 @@ body {
   position: relative;
   min-height: 100vh;
   display: flex;
+  justify-content: space-between;
   flex-direction: column;
 }
 
@@ -74,6 +75,7 @@ body {
   z-index: 50;
   display: flex;
   justify-content: space-between;
+  
   align-items: center;
   padding: 12px 20px;
   border-bottom: 1px solid var(--border);
@@ -82,6 +84,7 @@ body {
 
 .header-left {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 16px;
 }
@@ -99,12 +102,14 @@ body {
 
 .header-right {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 24px;
 }
 
 .status-indicator {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 8px;
   font-size: 14px;
@@ -120,45 +125,67 @@ body {
 
 .ekg-monitor {
   display: flex;
+  
   align-items: center;
-  gap: 8px;
-  background: #0a0a0a;
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  padding: 4px 8px;
+  gap: 4px;
+}
+
+.ekg-bracket {
+  font-size: 18px;
+  color: var(--accent);
+}
+
+.ekg-monitor.disconnected .ekg-bracket {
+  color: var(--accent);
+}
+
+.ekg-monitor.high-latency .ekg-bracket {
+  color: var(--warning);
 }
 
 .ekg-monitor svg {
+  display: block;
   width: 100px;
   height: 24px;
+  overflow: hidden;
 }
 
-.ekg-monitor polyline {
-  stroke: var(--success);
-  stroke-width: 2;
-  filter: drop-shadow(0 0 2px var(--success));
+#ekg-path, #ekg-trace {
   vector-effect: non-scaling-stroke;
 }
 
-#ekg-latency {
-  font-size: 12px;
-  color: var(--success);
-  min-width: 40px;
-  text-align: right;
+#ekg-dot {
+  filter: drop-shadow(0 0 3px var(--accent)) drop-shadow(0 0 6px var(--accent));
 }
 
-.ekg-monitor.disconnected polyline {
-  stroke: var(--error);
-  filter: drop-shadow(0 0 2px var(--error));
+#ekg-latency {
+  font-size: 16px;
+  color: #ffb347;
+  min-width: 55px;
+  text-align: right;
+  letter-spacing: 1px;
+}
+
+.ekg-monitor.disconnected #ekg-path {
+  stroke: var(--accent);
+}
+
+.ekg-monitor.disconnected #ekg-trace {
+  stroke: rgba(255, 140, 0, 0.2);
+}
+
+.ekg-monitor.disconnected #ekg-dot {
+  fill: var(--accent);
+  filter: drop-shadow(0 0 3px var(--accent)) drop-shadow(0 0 6px var(--accent));
 }
 
 .ekg-monitor.disconnected #ekg-latency {
-  color: var(--error);
+  color: var(--accent);
 }
 
-.ekg-monitor.high-latency polyline {
-  stroke: var(--warning);
-  filter: drop-shadow(0 0 2px var(--warning));
+.ekg-monitor.high-latency #ekg-dot {
+  fill: var(--warning);
+  filter: drop-shadow(0 0 4px var(--warning));
 }
 
 .ekg-monitor.high-latency #ekg-latency {
@@ -176,6 +203,7 @@ body {
   padding-top: 70px;
   padding-bottom: 50px;
   display: flex;
+  justify-content: space-between;
   flex-direction: column;
   gap: 16px;
   overflow-y: auto;
@@ -196,11 +224,13 @@ body {
   border: 1px solid var(--border);
   border-radius: 3px;
   display: flex;
+  justify-content: space-between;
   flex-direction: column;
 }
 
 .panel-header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
@@ -220,6 +250,7 @@ body {
 
 .panel-header .header-controls {
   display: flex;
+  justify-content: space-between;
   gap: 4px;
   align-items: center;
 }
@@ -363,12 +394,14 @@ body {
 
 .device-info {
   display: flex;
+  justify-content: space-between;
   flex-direction: column;
   gap: 8px;
 }
 
 .info-row {
   display: flex;
+  justify-content: space-between;
   gap: 8px;
 }
 
@@ -440,12 +473,14 @@ body {
 
 .lights-list {
   display: flex;
+  justify-content: space-between;
   flex-direction: column;
   gap: 6px;
 }
 
 .light-item {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 10px;
   padding: 6px 8px;
@@ -486,11 +521,13 @@ body {
   border: 1px solid var(--border);
   border-radius: 3px;
   display: flex;
+  justify-content: space-between;
   flex-direction: column;
 }
 
 .sensor-panel .sensor-header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
@@ -508,6 +545,7 @@ body {
 .sensor-panel .sensor-content {
   padding: 12px 16px;
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 16px;
 }
@@ -536,6 +574,7 @@ body {
 
 .motion-detections {
   display: flex;
+  justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
   font-size: 12px;
@@ -571,13 +610,13 @@ body {
 }
 
 .btn-icon.active {
-  color: var(--success);
-  border-color: var(--success);
+  color: #22aa22;
+  border-color: #22aa22;
 }
 
 .btn-icon.active:hover:not(:disabled) {
-  color: var(--error);
-  border-color: var(--error);
+  color: #aa3333;
+  border-color: #aa3333;
 }
 
 .sparkline {
@@ -594,6 +633,7 @@ body {
 .sparkline-empty {
   height: 100%;
   display: flex;
+  justify-content: space-between;
   align-items: center;
   justify-content: center;
   color: var(--border);
@@ -646,12 +686,14 @@ body {
 
 .sync-content {
   display: flex;
+  justify-content: space-between;
   flex-direction: column;
   gap: 16px;
 }
 
 .sync-status {
   display: flex;
+  justify-content: space-between;
   gap: 24px;
   align-items: flex-start;
 }
@@ -659,12 +701,14 @@ body {
 .sync-info {
   flex: 1;
   display: flex;
+  justify-content: space-between;
   flex-direction: column;
   gap: 8px;
 }
 
 .sync-row {
   display: flex;
+  justify-content: space-between;
   gap: 12px;
 }
 
@@ -676,6 +720,7 @@ body {
 .sync-row .value {
   color: var(--text-dim);
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 8px;
 }
@@ -691,12 +736,14 @@ body {
   padding-top: 16px;
   border-top: 1px dashed var(--border);
   display: flex;
+  justify-content: space-between;
   flex-direction: column;
   gap: 10px;
 }
 
 .config-row {
   display: flex;
+  justify-content: space-between;
   gap: 12px;
 }
 
@@ -706,6 +753,7 @@ body {
 
 .slider-row {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 12px;
 }
@@ -783,12 +831,14 @@ select optgroup {
   overflow-y: auto;
   font-size: 14px;
   display: flex;
+  justify-content: space-between;
   flex-direction: column;
   gap: 2px;
 }
 
 .log-line {
   display: flex;
+  justify-content: space-between;
   gap: 12px;
   padding: 2px 0;
 }
@@ -822,8 +872,14 @@ select optgroup {
   font-size: 14px;
   color: var(--text-dim);
   display: flex;
+  
   gap: 12px;
   align-items: center;
+  
+}
+
+.footer .ekg-monitor {
+  margin-left: auto;
 }
 
 .footer-time {
@@ -884,6 +940,7 @@ select optgroup {
   height: 100%;
   background: rgba(0, 0, 0, 0.8);
   display: flex;
+  justify-content: space-between;
   align-items: center;
   justify-content: center;
   z-index: 100;
@@ -903,8 +960,9 @@ select optgroup {
 
 .modal-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
+  
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   font-size: 14px;
@@ -921,18 +979,21 @@ select optgroup {
   padding: 12px 16px;
   border-top: 1px solid var(--border);
   display: flex;
+  justify-content: space-between;
   gap: 12px;
   justify-content: flex-end;
 }
 
 .device-list {
   display: flex;
+  justify-content: space-between;
   flex-direction: column;
   gap: 8px;
 }
 
 .device-item {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 12px;
   padding: 10px;
@@ -999,6 +1060,7 @@ select optgroup {
 /* Air Purifier Styles */
 .purifier-list {
   display: flex;
+  justify-content: space-between;
   flex-direction: column;
   gap: 12px;
 }
@@ -1019,6 +1081,7 @@ select optgroup {
 
 .purifier-header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
@@ -1036,6 +1099,7 @@ select optgroup {
 
 .purifier-stats {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 16px;
   flex-wrap: wrap;
@@ -1043,6 +1107,7 @@ select optgroup {
 
 .purifier-stat {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 4px;
   font-size: 14px;
@@ -1083,6 +1148,7 @@ select optgroup {
 
 .appliance-list {
   display: flex;
+  justify-content: space-between;
   flex-direction: column;
   gap: 12px;
 }
@@ -1103,6 +1169,7 @@ select optgroup {
 
 .appliance-header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
@@ -1120,6 +1187,7 @@ select optgroup {
 
 .appliance-stats {
   display: flex;
+  justify-content: space-between;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
@@ -1128,6 +1196,7 @@ select optgroup {
 
 .appliance-stat {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 4px;
   font-size: 14px;
@@ -1181,6 +1250,7 @@ select optgroup {
 
 .progress-bar-container {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 8px;
   flex: 1;
@@ -1278,8 +1348,9 @@ select optgroup {
 
 .purifier-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
+  
   padding: 10px 12px;
   background: var(--panel-bg);
   border-bottom: 1px solid var(--border);
@@ -1308,6 +1379,7 @@ select optgroup {
 
 .purifier-readings {
   display: flex;
+  justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
 }
@@ -1368,6 +1440,7 @@ select optgroup {
 
 .control-row {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 10px;
   margin-bottom: 8px;
@@ -1403,6 +1476,7 @@ select optgroup {
 
 .filter-item {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 8px;
   margin-bottom: 6px;
@@ -1448,6 +1522,7 @@ select optgroup {
 
 .filter-value {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 8px;
   flex: 1;

@@ -19,16 +19,6 @@
         <span class="version">v2.0.0</span>
       </div>
       <div class="header-right">
-        <span class="status-indicator" id="connection-status">
-          <i data-lucide="wifi-off"></i>
-          <span>OFFLINE</span>
-        </span>
-        <div class="ekg-monitor" id="ekg-monitor">
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-            <polyline id="ekg-line" points="" fill="none"/>
-          </svg>
-          <span id="ekg-latency">--ms</span>
-        </div>
         <span class="clock" id="clock">00:00:00</span>
       </div>
     </header>
@@ -160,8 +150,34 @@
     </main>
 
     <footer class="footer">
-      <span>READY</span>
-      <span class="blink">_</span>
+      <div class="footer-content">
+        <span class="footer-time"></span>
+        <span class="footer-msg">READY</span>
+        
+      </div>
+      
+      
+      <div class="ekg-monitor disconnected" id="ekg-monitor">
+        <span class="ekg-bracket">[</span>
+        <svg viewBox="0 0 200 100" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="ekg-gradient">
+              <stop offset="0%" stop-color="transparent"/>
+              <stop offset="60%" stop-color="#003300"/>
+              <stop offset="85%" stop-color="#00aa00"/>
+              <stop offset="100%" stop-color="#33ff33"/>
+            </linearGradient>
+            <mask id="ekg-mask">
+              <rect id="ekg-mask-rect" x="0" y="0" width="200" height="100" fill="white"/>
+            </mask>
+          </defs>
+          <path id="ekg-trace" fill="none" stroke="rgba(255, 140, 0, 0.2)" stroke-width="2" d="M 0 50 L 200 50"/>
+          <path id="ekg-path" fill="none" stroke="#ff8c00" stroke-width="2" mask="url(#ekg-mask)" d="M 0 50 L 200 50"/>
+          <circle id="ekg-dot" r="4" cx="100" cy="50" fill="#ff8c00"/>
+        </svg>
+        <span class="ekg-bracket">]</span>
+        <span id="ekg-latency">OFFLINE</span>
+      </div>
     </footer>
   </div>
 

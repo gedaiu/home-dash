@@ -10,6 +10,21 @@ const devices = new Map();
 const pm25History = new Map();
 const pm25DailyStats = new Map();
 
+const savedData = storage.loadSensorData();
+for (const [sensorId, entries] of Object.entries(savedData.history || {})) {
+  if (sensorId.startsWith('airpurifier_') && entries && entries.length > 0) {
+    pm25History.set(sensorId, entries);
+  }
+}
+for (const [key, stats] of Object.entries(savedData.dailyStats || {})) {
+  if (key.startsWith('airpurifier_') && stats) {
+    pm25DailyStats.set(key, stats);
+  }
+}
+if (pm25History.size > 0) {
+  console.log(`[airpurifier] Loaded ${pm25History.size} sensor history from disk`);
+}
+
 let broadcastFn = null;
 let saveTimeout = null;
 
@@ -193,7 +208,7 @@ async function sync(index) {
   coap.stopObserving(`${baseUrl}/sys/dev/status`);
   coap.reset(baseUrl);
 
-  const token = crypto.randomBytes(32).toString('hex').toUpperCase();
+  const token = crypto.randomBytes(4).toString('hex').toUpperCase();
   const response = await coap.request(`${baseUrl}/sys/dev/sync`, 'post',
     Buffer.from(token, 'utf-8'),
     { keepAlive: true, confirmable: true, retransmit: true }
@@ -262,7 +277,7 @@ async function startObserving(index) {
           if (data) {
             state.status = philipsCoap.parseStatus(data);
             state.lastUpdate = new Date().toISOString();
-            log(index, `Status: pwr=${state.status.pwr}, pm25=${state.status.pm25}, iaql=${state.status.iaql}, mode=${state.status.mode}`);
+            log(index, `Status: pwr=${state.status.pwr}, pm25=${state.status.pm25}, iaql=${state.status.iaql}, mode=${state.status.mode}, model=${state.status.model}`);
             updatePm25History(index, state.status.pm25);
             broadcast('airpurifier', { index, ...getStatus(index) });
             broadcast('pm25_sensors', getAllPm25Sensors());
@@ -306,13 +321,14 @@ async function sendCommand(index, key, value) {
     await connect(index);
   }
 
+  state.counter = philipsCoap.incrementCounter(state.counter);
+
   const command = philipsCoap.buildCommand(key, value);
   const encrypted = philipsCoap.encrypt(command, state.counter);
 
   log(index, `Sending command: ${key}=${value}`);
   log(index, `Command payload: ${JSON.stringify(command)}`);
-
-  state.counter = philipsCoap.incrementCounter(state.counter);
+  log(index, `Using counter: ${state.counter}`);
 
   const response = await coap.request(`${baseUrl}/sys/dev/control`, 'post',
     Buffer.from(encrypted, 'utf-8'),
@@ -339,10 +355,10 @@ async function setFanSpeed(index, speed) {
 }
 
 async function setMode(index, mode) {
-  const validModes = ['M', 'AG', 'AL', 'T', 'S'];
+  const validModes = ['M', 'P', 'A', 'AG', 'T', 'S', 'B'];
   const modeUpper = String(mode).toUpperCase();
   if (!validModes.includes(modeUpper)) {
-    throw new Error(`Invalid mode: ${mode}. Valid: M (manual), AG (auto), AL (allergen), T (turbo), S (sleep)`);
+    throw new Error(`Invalid mode: ${mode}. Valid: M (manual), P (auto), AG (allergen), T (turbo), S (sleep)`);
   }
   return sendCommand(index, 'mode', modeUpper);
 }

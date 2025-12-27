@@ -90,12 +90,68 @@ function buildCommand(key, value) {
   };
 }
 
+const MODEL_CAPABILITIES = {
+  'default': {
+    modes: [
+      { value: 'P', label: 'AUTO' },
+      { value: 'S', label: 'SLEEP' },
+      { value: 'T', label: 'TURBO' }
+    ],
+    speeds: ['s', '1', '2', 't'],
+    hasManualMode: false
+  },
+  'AC2729': {
+    modes: [
+      { value: 'P', label: 'AUTO' },
+      { value: 'AG', label: 'ALLERGEN' },
+      { value: 'S', label: 'SLEEP' },
+      { value: 'M', label: 'MANUAL' },
+      { value: 'T', label: 'TURBO' }
+    ],
+    speeds: ['s', '1', '2', '3', 't'],
+    hasManualMode: true
+  },
+  'AC2889': {
+    modes: [
+      { value: 'P', label: 'AUTO' },
+      { value: 'AG', label: 'ALLERGEN' },
+      { value: 'S', label: 'SLEEP' },
+      { value: 'T', label: 'TURBO' }
+    ],
+    speeds: ['s', '1', '2', 't'],
+    hasManualMode: false
+  },
+  'AC3829': {
+    modes: [
+      { value: 'P', label: 'AUTO' },
+      { value: 'S', label: 'SLEEP' },
+      { value: 'T', label: 'TURBO' }
+    ],
+    speeds: ['s', '1', '2', 't'],
+    hasManualMode: false
+  }
+};
+
+function getModelCapabilities(modelId) {
+  if (!modelId) {
+    return MODEL_CAPABILITIES['default'];
+  }
+
+  const modelKey = Object.keys(MODEL_CAPABILITIES).find(key =>
+    key !== 'default' && modelId.toUpperCase().includes(key.toUpperCase())
+  );
+
+  return MODEL_CAPABILITIES[modelKey] || MODEL_CAPABILITIES['default'];
+}
+
 function parseStatus(data) {
   const reported = data?.state?.reported || data;
+  const modelId = reported.modelid || null;
+  const capabilities = getModelCapabilities(modelId);
 
   return {
     name: reported.name || null,
-    model: reported.modelid || null,
+    model: modelId,
     pwr: reported.pwr,
     mode: reported.mode || null,
     om: reported.om || null,
@@ -112,7 +168,8 @@ function parseStatus(data) {
     fltsts2: reported.fltsts2 ?? null,
     flttotal2: reported.flttotal2 ?? null,
     runtime: reported.Runtime ?? null,
-    err: reported.err ?? null
+    err: reported.err ?? null,
+    capabilities
   };
 }
 
@@ -123,5 +180,7 @@ module.exports = {
   encrypt,
   incrementCounter,
   buildCommand,
-  parseStatus
+  parseStatus,
+  getModelCapabilities,
+  MODEL_CAPABILITIES
 };
