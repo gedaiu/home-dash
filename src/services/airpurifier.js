@@ -355,10 +355,10 @@ async function setFanSpeed(index, speed) {
 }
 
 async function setMode(index, mode) {
-  const validModes = ['M', 'P', 'A', 'AG', 'T', 'S', 'B'];
+  const validModes = ['M', 'P', 'A', 'AG', 'GT', 'T', 'S', 'B'];
   const modeUpper = String(mode).toUpperCase();
   if (!validModes.includes(modeUpper)) {
-    throw new Error(`Invalid mode: ${mode}. Valid: M (manual), P (auto), AG (allergen), T (turbo), S (sleep)`);
+    throw new Error(`Invalid mode: ${mode}. Valid: M (manual), P (auto), AG (allergen), GT (gentle), T (turbo), S (sleep)`);
   }
   return sendCommand(index, 'mode', modeUpper);
 }

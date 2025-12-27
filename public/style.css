@@ -574,16 +574,17 @@ body {
 
 .motion-detections {
   display: flex;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 4px;
   flex-wrap: wrap;
   font-size: 12px;
   color: var(--text-dim);
+  max-height: 40px;
+  overflow: hidden;
 }
 
 .motion-detections span {
   background: var(--border);
-  padding: 2px 6px;
+  padding: 2px 5px;
   border-radius: 3px;
 }
 

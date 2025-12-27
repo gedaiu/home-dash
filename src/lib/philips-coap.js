@@ -129,6 +129,16 @@ const MODEL_CAPABILITIES = {
     ],
     speeds: ['s', '1', '2', 't'],
     hasManualMode: false
+  },
+  'AC2939': {
+    modes: [
+      { value: 'P', label: 'AUTO' },
+      { value: 'GT', label: 'GENTLE' },
+      { value: 'S', label: 'SLEEP' },
+      { value: 'T', label: 'TURBO' }
+    ],
+    speeds: ['s', '1', '2', '3', 't'],
+    hasManualMode: false
   }
 };
 
