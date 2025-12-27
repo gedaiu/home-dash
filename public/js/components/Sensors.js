@@ -27,7 +27,7 @@ function formatTimeAgo(isoString) {
 function getLastMotionDetections(history) {
   if (!history || history.length === 0) return [];
   const detections = [];
-  for (let i = history.length - 1; i >= 0 && detections.length < 5; i--) {
+  for (let i = history.length - 1; i >= 0 && detections.length < 10; i--) {
     if (history[i].v === 1) {
       const time = new Date(history[i].t);
       detections.push(`${time.getHours().toString().padStart(2, '0')}:${time.getMinutes().toString().padStart(2, '0')}`);
@@ -121,11 +121,18 @@ function SensorPanel({ sensor }) {
   if (sensor.category === 'motion') {
     const detections = getLastMotionDetections(sensor.history);
     if (detections.length > 0) {
-      bottomContent = html`<div class="motion-detections">${detections.map(d => html`<span key=${d}>${d}</span>`)}</div>`;
+      const row1 = detections.slice(0, 5);
+      const row2 = detections.slice(5, 10);
+      bottomContent = html`
+        <div class="motion-detections-container">
+          <div class="motion-detections">${row1.map(d => html`<span key=${d}>${d}</span>`)}</div>
+          ${row2.length > 0 && html`<div class="motion-detections">${row2.map(d => html`<span key=${d}>${d}</span>`)}</div>`}
+        </div>
+      `;
     } else if (sensor.state?.lastupdated) {
-      bottomContent = html`<div class="motion-detections"><span>${formatTimeAgo(sensor.state.lastupdated)}</span></div>`;
+      bottomContent = html`<div class="motion-detections-container"><div class="motion-detections"><span>${formatTimeAgo(sensor.state.lastupdated)}</span></div></div>`;
     } else {
-      bottomContent = html`<div class="motion-detections"><span>No recent activity</span></div>`;
+      bottomContent = html`<div class="motion-detections-container"><div class="motion-detections"><span>No recent activity</span></div></div>`;
     }
   } else if (sensor.category === 'switch') {
     const timeAgo = sensor.state?.lastupdated ? formatTimeAgo(sensor.state.lastupdated) : '';
