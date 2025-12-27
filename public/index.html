@@ -23,22 +23,30 @@
           <i data-lucide="wifi-off"></i>
           <span>OFFLINE</span>
         </span>
+        <div class="ekg-monitor" id="ekg-monitor">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+            <polyline id="ekg-line" points="" fill="none"/>
+          </svg>
+          <span id="ekg-latency">--ms</span>
+        </div>
         <span class="clock" id="clock">00:00:00</span>
       </div>
     </header>
 
     <main class="main">
       <div class="panel-row" id="devices-row">
-        <section class="panel" id="roomba-panel">
+        <section class="panel" id="roomba-panel" data-panel-key="roomba" data-default-name="ROOMBA">
           <div class="panel-header">
             <i data-lucide="bot"></i>
-            <span>ROOMBA</span>
+            <span class="panel-title">ROOMBA</span>
             <div class="header-controls" id="roomba-controls"></div>
           </div>
           <div class="panel-content" id="roomba-content">
             <div class="loading">Connecting...</div>
           </div>
         </section>
+
+        <div id="airpurifier-content"></div>
       </div>
 
       <div class="crt-divider"></div>
@@ -142,27 +150,12 @@
           <div class="panel-header">
             <i data-lucide="triangle"></i>
             <span>NANOLEAF</span>
-            <button class="btn-icon" id="discover-nanoleaf" title="Discover">
-              <i data-lucide="search"></i>
-            </button>
           </div>
           <div class="panel-content" id="nanoleaf-content">
             <div class="loading">Connecting...</div>
           </div>
         </section>
 
-        <section class="panel" id="airpurifier-panel">
-          <div class="panel-header">
-            <i data-lucide="wind"></i>
-            <span>AIR PURIFIERS</span>
-            <button class="btn-icon" id="discover-airpurifier" title="Discover">
-              <i data-lucide="search"></i>
-            </button>
-          </div>
-          <div class="panel-content" id="airpurifier-content">
-            <div class="loading">Connecting...</div>
-          </div>
-        </section>
       </div>
     </main>
 

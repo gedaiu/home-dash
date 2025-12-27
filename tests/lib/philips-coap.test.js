@@ -1,280 +1,256 @@
 const {
-  hexToBytes,
+  SECRET_KEY,
   deriveKeyIv,
-  encryptPayload,
-  decryptPayload,
-  createCoapPacket,
-  parseCoapPacket,
-  COAP_PORT,
-  COAP_TYPE_CON,
-  COAP_TYPE_ACK,
-  COAP_GET,
-  COAP_POST
+  decrypt,
+  encrypt,
+  incrementCounter,
+  buildCommand,
+  parseStatus
 } = require('../../src/lib/philips-coap');
 
 describe('philips-coap', () => {
-  describe('constants', () => {
-    it('COAP_PORT is 5683', () => {
-      expect(COAP_PORT).toBe(5683);
-    });
-
-    it('COAP_TYPE_CON is 0', () => {
-      expect(COAP_TYPE_CON).toBe(0);
-    });
-
-    it('COAP_TYPE_ACK is 2', () => {
-      expect(COAP_TYPE_ACK).toBe(2);
-    });
-
-    it('COAP_GET is 0x01', () => {
-      expect(COAP_GET).toBe(0x01);
-    });
-
-    it('COAP_POST is 0x02', () => {
-      expect(COAP_POST).toBe(0x02);
-    });
-  });
-
-  describe('hexToBytes', () => {
-    it('converts empty string to empty buffer', () => {
-      expect(hexToBytes('')).toEqual(Buffer.from([]));
-    });
-
-    it('converts single byte', () => {
-      expect(hexToBytes('ff')).toEqual(Buffer.from([255]));
-    });
-
-    it('converts multiple bytes', () => {
-      expect(hexToBytes('0102ff')).toEqual(Buffer.from([1, 2, 255]));
-    });
-
-    it('handles lowercase hex', () => {
-      expect(hexToBytes('abcd')).toEqual(Buffer.from([0xab, 0xcd]));
-    });
-
-    it('handles uppercase hex', () => {
-      expect(hexToBytes('ABCD')).toEqual(Buffer.from([0xab, 0xcd]));
-    });
-
-    it('converts known pattern', () => {
-      expect(hexToBytes('48656c6c6f')).toEqual(Buffer.from('Hello'));
+  describe('SECRET_KEY', () => {
+    it('equals JiangPan', () => {
+      expect(SECRET_KEY).toBe('JiangPan');
     });
   });
 
   describe('deriveKeyIv', () => {
-    it('returns object with key and iv', () => {
-      const result = deriveKeyIv(0);
-      expect(result).toHaveProperty('key');
-      expect(result).toHaveProperty('iv');
+    it('returns key and iv buffers of 16 bytes each', () => {
+      const { key, iv } = deriveKeyIv('12345678');
+      expect(key).toBeInstanceOf(Buffer);
+      expect(iv).toBeInstanceOf(Buffer);
+      expect(key.length).toBe(16);
+      expect(iv.length).toBe(16);
     });
 
-    it('key and iv are 16 bytes each', () => {
-      const result = deriveKeyIv(0);
-      expect(result.key.length).toBe(16);
-      expect(result.iv.length).toBe(16);
+    it('returns different results for different salts', () => {
+      const result1 = deriveKeyIv('AAAAAAAA');
+      const result2 = deriveKeyIv('BBBBBBBB');
+      expect(result1.key.equals(result2.key)).toBe(false);
+      expect(result1.iv.equals(result2.iv)).toBe(false);
     });
 
-    it('key equals iv', () => {
-      const result = deriveKeyIv(0);
-      expect(result.key).toEqual(result.iv);
-    });
-
-    it('different counters produce different keys', () => {
-      const result0 = deriveKeyIv(0);
-      const result1 = deriveKeyIv(1);
-      expect(result0.key).not.toEqual(result1.key);
-    });
-
-    it('same counter produces same key', () => {
-      const result1 = deriveKeyIv(42);
-      const result2 = deriveKeyIv(42);
-      expect(result1.key).toEqual(result2.key);
-    });
-
-    it('handles large counter values', () => {
-      const result = deriveKeyIv(0xffffffff);
-      expect(result.key.length).toBe(16);
+    it('returns consistent results for same salt', () => {
+      const result1 = deriveKeyIv('DEADBEEF');
+      const result2 = deriveKeyIv('DEADBEEF');
+      expect(result1.key.equals(result2.key)).toBe(true);
+      expect(result1.iv.equals(result2.iv)).toBe(true);
     });
   });
 
-  describe('encryptPayload and decryptPayload', () => {
-    it('roundtrip encrypts and decrypts simple object', () => {
-      const original = { test: 'value' };
-      const counter = 1;
-      const encrypted = encryptPayload(original, counter);
-      const { data, counter: decryptedCounter } = decryptPayload(encrypted);
-
-      expect(data).toEqual(original);
-      expect(decryptedCounter).toBe(counter);
+  describe('incrementCounter', () => {
+    it('increments 00000000 to 00000001', () => {
+      expect(incrementCounter('00000000')).toBe('00000001');
     });
 
-    it('roundtrip with complex object', () => {
-      const original = { pwr: '1', mode: 'auto', om: 2, nested: { a: 1 } };
-      const counter = 100;
-      const encrypted = encryptPayload(original, counter);
-      const { data } = decryptPayload(encrypted);
+    it('increments 00000001 to 00000002', () => {
+      expect(incrementCounter('00000001')).toBe('00000002');
+    });
 
-      expect(data).toEqual(original);
+    it('increments 000000FF to 00000100', () => {
+      expect(incrementCounter('000000FF')).toBe('00000100');
+    });
+
+    it('increments 0000FFFF to 00010000', () => {
+      expect(incrementCounter('0000FFFF')).toBe('00010000');
+    });
+
+    it('handles lowercase input and returns uppercase', () => {
+      expect(incrementCounter('0000000a')).toBe('0000000B');
+    });
+
+    it('wraps around at FFFFFFFF to 00000000', () => {
+      expect(incrementCounter('FFFFFFFF')).toBe('00000000');
+    });
+  });
+
+  describe('buildCommand', () => {
+    it('builds power on command', () => {
+      const cmd = buildCommand('pwr', '1');
+      expect(cmd).toEqual({
+        state: {
+          desired: {
+            CommandType: 'app',
+            DeviceId: '',
+            EnduserId: '',
+            pwr: '1'
+          }
+        }
+      });
+    });
+
+    it('builds mode command', () => {
+      const cmd = buildCommand('mode', 'AG');
+      expect(cmd.state.desired.mode).toBe('AG');
+    });
+
+    it('builds fan speed command', () => {
+      const cmd = buildCommand('om', '2');
+      expect(cmd.state.desired.om).toBe('2');
+    });
+
+    it('builds child lock command', () => {
+      const cmd = buildCommand('cl', true);
+      expect(cmd.state.desired.cl).toBe(true);
+    });
+  });
+
+  describe('encrypt and decrypt', () => {
+    it('round-trips simple JSON data', () => {
+      const original = { state: { desired: { pwr: '1' } } };
+      const counter = 'DEADBEEF';
+      const encrypted = encrypt(original, counter);
+      const decrypted = decrypt(encrypted);
+      expect(decrypted).toEqual(original);
     });
 
     it('encrypted payload has correct format', () => {
-      const encrypted = encryptPayload({ test: 1 }, 1);
-      expect(encrypted.length).toBeGreaterThanOrEqual(72);
-      expect(/^[0-9a-f]+$/i.test(encrypted)).toBe(true);
+      const data = { test: 'value' };
+      const counter = '12345678';
+      const encrypted = encrypt(data, counter);
+
+      expect(encrypted.slice(0, 8)).toBe('12345678');
+      expect(encrypted.length).toBeGreaterThan(72);
+      expect(encrypted.slice(-64)).toMatch(/^[0-9A-F]{64}$/);
     });
 
-    it('encrypted payload starts with 8-char counter hex', () => {
-      const encrypted = encryptPayload({ test: 1 }, 255);
-      expect(encrypted.slice(0, 8)).toBe('000000ff');
-    });
-
-    it('encrypted payload ends with 64-char SHA256', () => {
-      const encrypted = encryptPayload({ test: 1 }, 1);
-      expect(encrypted.slice(-64).length).toBe(64);
-    });
-
-    it('decryptPayload returns null for payload too short', () => {
-      const result = decryptPayload('abc');
-      expect(result.data).toBeNull();
-      expect(result.counter).toBe(0);
-    });
-
-    it('decryptPayload returns null for empty encrypted data', () => {
-      const shortPayload = '00000001' + '0'.repeat(64);
-      const result = decryptPayload(shortPayload);
-      expect(result.data).toBeNull();
-    });
-
-    it('decryptPayload handles invalid encrypted data gracefully', () => {
-      const invalidPayload = '00000001' + 'invalid' + '0'.repeat(64);
-      const result = decryptPayload(invalidPayload);
-      expect(result.data).toBeNull();
+    it('round-trips command with various fields', () => {
+      const cmd = buildCommand('mode', 'AG');
+      const counter = 'ABCD1234';
+      const encrypted = encrypt(cmd, counter);
+      const decrypted = decrypt(encrypted);
+      expect(decrypted).toEqual(cmd);
     });
   });
 
-  describe('createCoapPacket', () => {
-    it('creates packet with version 1', () => {
-      const packet = createCoapPacket(COAP_TYPE_CON, COAP_GET, 1, null, [], null);
-      expect((packet[0] >> 6) & 0x03).toBe(1);
+  describe('decrypt', () => {
+    it('returns null for null payload', () => {
+      expect(decrypt(null)).toBeNull();
     });
 
-    it('includes message type in header', () => {
-      const packet = createCoapPacket(COAP_TYPE_CON, COAP_GET, 1, null, [], null);
-      expect((packet[0] >> 4) & 0x03).toBe(COAP_TYPE_CON);
+    it('returns null for empty string', () => {
+      expect(decrypt('')).toBeNull();
     });
 
-    it('includes code in header', () => {
-      const packet = createCoapPacket(COAP_TYPE_CON, COAP_GET, 1, null, [], null);
-      expect(packet[1]).toBe(COAP_GET);
-    });
-
-    it('includes message ID in header', () => {
-      const packet = createCoapPacket(COAP_TYPE_CON, COAP_GET, 0x1234, null, [], null);
-      expect(packet[2]).toBe(0x12);
-      expect(packet[3]).toBe(0x34);
-    });
-
-    it('includes token when provided', () => {
-      const token = Buffer.from([0xaa, 0xbb]);
-      const packet = createCoapPacket(COAP_TYPE_CON, COAP_GET, 1, token, [], null);
-      expect(packet[0] & 0x0f).toBe(2);
-      expect(packet[4]).toBe(0xaa);
-      expect(packet[5]).toBe(0xbb);
-    });
-
-    it('encodes URI path option', () => {
-      const options = [{ number: 11, value: 'sys' }];
-      const packet = createCoapPacket(COAP_TYPE_CON, COAP_GET, 1, null, options, null);
-      expect(packet.length).toBeGreaterThan(4);
-    });
-
-    it('includes payload marker and payload', () => {
-      const packet = createCoapPacket(COAP_TYPE_CON, COAP_POST, 1, null, [], 'test');
-      expect(packet.includes(0xff)).toBe(true);
-      expect(packet.toString().includes('test')).toBe(true);
-    });
-
-    it('handles buffer payload', () => {
-      const payload = Buffer.from('hello');
-      const packet = createCoapPacket(COAP_TYPE_CON, COAP_POST, 1, null, [], payload);
-      expect(packet.includes(0xff)).toBe(true);
+    it('returns null for payload shorter than 72 chars', () => {
+      expect(decrypt('ABCD1234' + '0'.repeat(60))).toBeNull();
     });
   });
 
-  describe('parseCoapPacket', () => {
-    it('returns null for buffer too short', () => {
-      expect(parseCoapPacket(Buffer.from([0, 0, 0]))).toBeNull();
+  describe('parseStatus', () => {
+    it('parses pwr field', () => {
+      const data = { state: { reported: { pwr: '1' } } };
+      const status = parseStatus(data);
+      expect(status.pwr).toBe('1');
     });
 
-    it('parses version from header', () => {
-      const packet = createCoapPacket(COAP_TYPE_CON, COAP_GET, 1, null, [], null);
-      const parsed = parseCoapPacket(packet);
-      expect(parsed.version).toBe(1);
+    it('parses mode field', () => {
+      const data = { state: { reported: { mode: 'AG' } } };
+      const status = parseStatus(data);
+      expect(status.mode).toBe('AG');
     });
 
-    it('parses type from header', () => {
-      const packet = createCoapPacket(COAP_TYPE_ACK, COAP_GET, 1, null, [], null);
-      const parsed = parseCoapPacket(packet);
-      expect(parsed.type).toBe(COAP_TYPE_ACK);
+    it('parses om (fan speed) field', () => {
+      const data = { state: { reported: { om: '2' } } };
+      const status = parseStatus(data);
+      expect(status.om).toBe('2');
     });
 
-    it('parses code from header', () => {
-      const packet = createCoapPacket(COAP_TYPE_CON, COAP_POST, 1, null, [], null);
-      const parsed = parseCoapPacket(packet);
-      expect(parsed.code).toBe(COAP_POST);
+    it('parses pm25 field', () => {
+      const data = { state: { reported: { pm25: 15 } } };
+      const status = parseStatus(data);
+      expect(status.pm25).toBe(15);
     });
 
-    it('parses message ID from header', () => {
-      const packet = createCoapPacket(COAP_TYPE_CON, COAP_GET, 0xabcd, null, [], null);
-      const parsed = parseCoapPacket(packet);
-      expect(parsed.messageId).toBe(0xabcd);
+    it('parses iaql (air quality index) field', () => {
+      const data = { state: { reported: { iaql: 3 } } };
+      const status = parseStatus(data);
+      expect(status.iaql).toBe(3);
     });
 
-    it('parses token', () => {
-      const token = Buffer.from([0x11, 0x22, 0x33]);
-      const packet = createCoapPacket(COAP_TYPE_CON, COAP_GET, 1, token, [], null);
-      const parsed = parseCoapPacket(packet);
-      expect(parsed.token).toEqual(token);
+    it('parses tvoc field', () => {
+      const data = { state: { reported: { tvoc: 2 } } };
+      const status = parseStatus(data);
+      expect(status.tvoc).toBe(2);
     });
 
-    it('parses options', () => {
-      const options = [{ number: 11, value: 'test' }];
-      const packet = createCoapPacket(COAP_TYPE_CON, COAP_GET, 1, null, options, null);
-      const parsed = parseCoapPacket(packet);
-      expect(parsed.options.length).toBe(1);
-      expect(parsed.options[0].number).toBe(11);
+    it('parses aqil (light brightness) field', () => {
+      const data = { state: { reported: { aqil: 50 } } };
+      const status = parseStatus(data);
+      expect(status.aqil).toBe(50);
     });
 
-    it('parses payload', () => {
-      const packet = createCoapPacket(COAP_TYPE_CON, COAP_POST, 1, null, [], 'hello');
-      const parsed = parseCoapPacket(packet);
-      expect(parsed.payload.toString()).toBe('hello');
+    it('parses uil (button light) field', () => {
+      const data = { state: { reported: { uil: '1' } } };
+      const status = parseStatus(data);
+      expect(status.uil).toBe('1');
     });
 
-    it('returns null payload when no payload marker', () => {
-      const packet = createCoapPacket(COAP_TYPE_CON, COAP_GET, 1, null, [], null);
-      const parsed = parseCoapPacket(packet);
-      expect(parsed.payload).toBeNull();
+    it('parses cl (child lock) field', () => {
+      const data = { state: { reported: { cl: true } } };
+      const status = parseStatus(data);
+      expect(status.cl).toBe(true);
     });
 
-    it('roundtrip create and parse', () => {
-      const token = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
-      const options = [
-        { number: 11, value: 'sys' },
-        { number: 11, value: 'dev' },
-        { number: 11, value: 'status' }
-      ];
-      const payload = 'test payload';
-      const packet = createCoapPacket(COAP_TYPE_CON, COAP_GET, 12345, token, options, payload);
-      const parsed = parseCoapPacket(packet);
+    it('parses filter status fields', () => {
+      const data = {
+        state: {
+          reported: {
+            fltsts0: 100,
+            flttotal0: 720,
+            fltsts1: 3000,
+            flttotal1: 4800,
+            fltsts2: 500,
+            flttotal2: 2400
+          }
+        }
+      };
+      const status = parseStatus(data);
+      expect(status).toMatchObject({
+        fltsts0: 100,
+        flttotal0: 720,
+        fltsts1: 3000,
+        flttotal1: 4800,
+        fltsts2: 500,
+        flttotal2: 2400
+      });
+    });
 
-      expect(parsed.version).toBe(1);
-      expect(parsed.type).toBe(COAP_TYPE_CON);
-      expect(parsed.code).toBe(COAP_GET);
-      expect(parsed.messageId).toBe(12345);
-      expect(parsed.token).toEqual(token);
-      expect(parsed.options.length).toBe(3);
-      expect(parsed.payload.toString()).toBe(payload);
+    it('parses device info', () => {
+      const data = { state: { reported: { name: 'Living Room', modelid: 'AC2939/10' } } };
+      const status = parseStatus(data);
+      expect(status.name).toBe('Living Room');
+      expect(status.model).toBe('AC2939/10');
+    });
+
+    it('parses err field', () => {
+      const data = { state: { reported: { err: 5 } } };
+      const status = parseStatus(data);
+      expect(status.err).toBe(5);
+    });
+
+    it('parses runtime field', () => {
+      const data = { state: { reported: { Runtime: 123456 } } };
+      const status = parseStatus(data);
+      expect(status.runtime).toBe(123456);
+    });
+
+    it('handles data without state.reported wrapper', () => {
+      const data = { pwr: '1', mode: 'M', pm25: 10 };
+      const status = parseStatus(data);
+      expect(status.pwr).toBe('1');
+      expect(status.mode).toBe('M');
+      expect(status.pm25).toBe(10);
+    });
+
+    it('returns null for missing fields', () => {
+      const data = { state: { reported: {} } };
+      const status = parseStatus(data);
+      expect(status.name).toBeNull();
+      expect(status.model).toBeNull();
+      expect(status.pm25).toBeNull();
+      expect(status.tvoc).toBeNull();
     });
   });
 });

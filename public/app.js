@@ -38,21 +38,6 @@ const API = {
     stop: () => fetch('/api/sync/stop', { method: 'POST' }).then(r => r.json()),
     status: () => fetch('/api/sync/status').then(r => r.json())
   },
-  airpurifier: {
-    discover: () => fetch('/api/airpurifier/discover').then(r => r.json()),
-    devices: () => fetch('/api/airpurifier/devices').then(r => r.json()),
-    pair: (ip) => fetch('/api/airpurifier/devices/pair', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip })
-    }).then(r => r.json()),
-    remove: (id) => fetch(`/api/airpurifier/devices/${id}`, { method: 'DELETE' }).then(r => r.json()),
-    setPower: (id, on) => fetch(`/api/airpurifier/devices/${id}/power`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ on })
-    }).then(r => r.json())
-  },
   homeconnect: {
     status: () => fetch('/api/homeconnect/status').then(r => r.json()),
     devices: () => fetch('/api/homeconnect/devices').then(r => r.json()),
@@ -72,6 +57,44 @@ const API = {
     pause: () => fetch('/api/roomba/pause', { method: 'POST' }).then(r => r.json()),
     resume: () => fetch('/api/roomba/resume', { method: 'POST' }).then(r => r.json()),
     dock: () => fetch('/api/roomba/dock', { method: 'POST' }).then(r => r.json())
+  },
+  airpurifier: {
+    devices: () => fetch("/api/airpurifier/devices").then(r => r.json()),
+    status: (index) => fetch(`/api/airpurifier/devices/${index}/status`).then(r => r.json()),
+    add: (ip, name) => fetch("/api/airpurifier/devices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ip, name })
+    }).then(r => r.json()),
+    remove: (index) => fetch(`/api/airpurifier/devices/${index}`, { method: "DELETE" }).then(r => r.json()),
+    connect: (index) => fetch(`/api/airpurifier/devices/${index}/connect`, { method: "POST" }).then(r => r.json()),
+    disconnect: (index) => fetch(`/api/airpurifier/devices/${index}/disconnect`, { method: "POST" }).then(r => r.json()),
+    power: (index, on) => fetch(`/api/airpurifier/devices/${index}/power`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ on })
+    }).then(r => r.json()),
+    mode: (index, mode) => fetch(`/api/airpurifier/devices/${index}/mode`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode })
+    }).then(r => r.json()),
+    fan: (index, speed) => fetch(`/api/airpurifier/devices/${index}/fan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ speed })
+    }).then(r => r.json())
+  },
+  panels: {
+    getNames: () => fetch('/api/panels/names').then(r => r.json()),
+    setName: (key, name) => fetch(`/api/panels/names/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    }).then(r => r.json()),
+    deleteName: (key) => fetch(`/api/panels/names/${encodeURIComponent(key)}`, {
+      method: 'DELETE'
+    }).then(r => r.json())
   }
 };
 
@@ -89,7 +112,8 @@ const CATEGORY_ICONS = {
   ceiling: 'lamp-ceiling',
   lamp: 'lamp-desk',
   bulb: 'lightbulb',
-  device: 'cpu'
+  device: 'cpu',
+  pm25: 'wind'
 };
 
 const SYNCABLE_CATEGORIES = ['bulb', 'lamp', 'spot', 'ceiling', 'strip', 'candle'];
@@ -182,10 +206,18 @@ let allRooms = [];
 let allLights = [];
 let nanoleafDevice = null;
 let nanoleafConfig = null;
-let airPurifiers = [];
 let homeConnectDevices = [];
 let roombaStatus = null;
+let pm25Sensors = [];
 const HISTORY_LENGTH = 2880;
+
+let pingHistory = [];
+const PING_HISTORY_LENGTH = 30;
+const PING_INTERVAL = 3000;
+let pingTimer = null;
+let lastPingTime = 0;
+
+let panelNames = {};
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -217,6 +249,193 @@ function updateClock() {
   $('#clock').textContent = new Date().toLocaleTimeString();
 }
 
+async function loadPanelNames() {
+  try {
+    panelNames = await API.panels.getNames();
+  } catch {
+    panelNames = {};
+  }
+}
+
+function getPanelDisplayName(key, defaultName) {
+  return panelNames[key] || defaultName;
+}
+
+function makeEditableTitle(element, panelKey, defaultName) {
+  if (element.classList.contains('editable-title')) {
+    return;
+  }
+
+  element.classList.add('editable-title');
+  element.title = 'Double-click to rename';
+
+  element.addEventListener('dblclick', (e) => {
+    e.stopPropagation();
+    const currentName = element.textContent;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'inline-edit-input';
+    input.value = currentName;
+
+    const restore = (newName) => {
+      element.textContent = newName || currentName;
+      element.style.display = '';
+    };
+
+    const saveAndClose = async () => {
+      const newName = input.value.trim();
+      if (newName && newName !== defaultName) {
+        await API.panels.setName(panelKey, newName);
+        panelNames[panelKey] = newName;
+        input.remove();
+        restore(newName);
+      } else if (!newName || newName === defaultName) {
+        await API.panels.deleteName(panelKey);
+        delete panelNames[panelKey];
+        input.remove();
+        restore(defaultName);
+      }
+    };
+
+    input.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        await saveAndClose();
+      } else if (e.key === 'Escape') {
+        input.remove();
+        restore(currentName);
+      }
+    });
+
+    input.addEventListener('blur', () => {
+      input.remove();
+      restore(currentName);
+    });
+
+    element.style.display = 'none';
+    element.parentNode.insertBefore(input, element.nextSibling);
+    input.focus();
+    input.select();
+  });
+}
+
+function attachEditableTitles() {
+  const panels = $$('[data-panel-key]');
+  panels.forEach(panel => {
+    const panelKey = panel.dataset.panelKey;
+    const defaultName = panel.dataset.defaultName;
+    const titleEl = panel.querySelector('.panel-title');
+    if (titleEl && panelKey && defaultName) {
+      makeEditableTitle(titleEl, panelKey, defaultName);
+    }
+  });
+}
+
+function startPingLoop() {
+  if (pingTimer) {
+    clearInterval(pingTimer);
+  }
+  pingTimer = setInterval(sendPing, PING_INTERVAL);
+  sendPing();
+}
+
+function stopPingLoop() {
+  if (pingTimer) {
+    clearInterval(pingTimer);
+    pingTimer = null;
+  }
+  pingHistory = [];
+  updateEkgDisconnected();
+}
+
+function sendPing() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    lastPingTime = Date.now();
+    ws.send(JSON.stringify({ type: 'ping', timestamp: lastPingTime }));
+  }
+}
+
+function handlePong(timestamp) {
+  const latency = Date.now() - timestamp;
+  pingHistory.push(latency);
+  if (pingHistory.length > PING_HISTORY_LENGTH) {
+    pingHistory.shift();
+  }
+  updateEkgDisplay(latency);
+}
+
+function generateEkgBeat(startX, beatWidth, amplitude) {
+  const points = [];
+  const baseY = 50;
+  const w = beatWidth;
+
+  points.push([startX, baseY]);
+  points.push([startX + w * 0.1, baseY]);
+  points.push([startX + w * 0.15, baseY - 5 * amplitude]);
+  points.push([startX + w * 0.2, baseY + 3 * amplitude]);
+  points.push([startX + w * 0.25, baseY - 40 * amplitude]);
+  points.push([startX + w * 0.3, baseY + 15 * amplitude]);
+  points.push([startX + w * 0.35, baseY - 8 * amplitude]);
+  points.push([startX + w * 0.4, baseY]);
+  points.push([startX + w * 0.5, baseY + 5 * amplitude]);
+  points.push([startX + w * 0.6, baseY]);
+  points.push([startX + w, baseY]);
+
+  return points;
+}
+
+function updateEkgDisplay(currentLatency) {
+  const line = $('#ekg-line');
+  const latencyEl = $('#ekg-latency');
+  const monitor = $('#ekg-monitor');
+
+  if (!line || !latencyEl || !monitor) {
+    return;
+  }
+
+  monitor.classList.remove('disconnected');
+  latencyEl.textContent = `${currentLatency}ms`;
+
+  if (pingHistory.length < 1) {
+    line.setAttribute('points', '0,50 100,50');
+    return;
+  }
+
+  const allPoints = [];
+  const beatWidth = 100 / PING_HISTORY_LENGTH;
+
+  for (let i = 0; i < pingHistory.length; i++) {
+    const latency = pingHistory[i];
+    const amplitude = Math.max(0.3, Math.min(1, 1 - (latency / 400)));
+    const x = i * beatWidth;
+    const beatPoints = generateEkgBeat(x, beatWidth, amplitude);
+    allPoints.push(...beatPoints);
+  }
+
+  const lastX = pingHistory.length * beatWidth;
+  if (lastX < 100) {
+    allPoints.push([100, 50]);
+  }
+
+  line.setAttribute('points', allPoints.map(p => p.join(',')).join(' '));
+  monitor.classList.toggle('high-latency', currentLatency > 200);
+}
+
+function updateEkgDisconnected() {
+  const latencyEl = $('#ekg-latency');
+  const monitor = $('#ekg-monitor');
+  const line = $('#ekg-line');
+
+  if (!latencyEl || !monitor || !line) {
+    return;
+  }
+
+  monitor.classList.add('disconnected');
+  monitor.classList.remove('high-latency');
+  latencyEl.textContent = '--ms';
+  line.setAttribute('points', '');
+}
+
 function connectWebSocket() {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${protocol}//${location.host}`);
@@ -229,6 +448,7 @@ function connectWebSocket() {
     `;
     lucide.createIcons();
     log('WebSocket connected', 'success');
+    startPingLoop();
   };
 
   ws.onclose = () => {
@@ -239,6 +459,7 @@ function connectWebSocket() {
     `;
     lucide.createIcons();
     log('WebSocket disconnected', 'error');
+    stopPingLoop();
     setTimeout(connectWebSocket, 3000);
   };
 
@@ -250,6 +471,9 @@ function connectWebSocket() {
 
 function handleWebSocketMessage(msg) {
   switch (msg.type) {
+    case 'pong':
+      handlePong(msg.timestamp);
+      break;
     case 'status':
       updateSyncStatus(msg.data);
       break;
@@ -266,16 +490,27 @@ function handleWebSocketMessage(msg) {
     case 'rooms':
       updateRooms(msg.data);
       break;
-    case 'airpurifiers':
-      updateAirPurifiers(msg.data);
-      break;
     case 'homeconnect':
       updateHomeConnect(msg.data);
       break;
     case 'roomba':
       updateRoomba(msg.data);
       break;
+    case 'airpurifier':
+      updateAirPurifier(msg.data);
+      break;
+    case 'pm25_sensors':
+      updatePm25Sensors(msg.data);
+      break;
+    case 'error':
+      handleServiceError(msg.data);
+      break;
   }
+}
+
+function handleServiceError(data) {
+  const message = `[${data.service}] ${data.message}`;
+  log(message, 'error');
 }
 
 function reloadAllData() {
@@ -283,8 +518,8 @@ function reloadAllData() {
   loadNanoleaf();
   loadRooms();
   loadSyncConfig();
-  loadAirPurifiers();
   loadHomeConnect();
+  loadAirPurifiers();
   loadRoomba();
 }
 
@@ -432,122 +667,6 @@ async function loadNanoleaf() {
   } catch (err) {
     content.innerHTML = `<div class="loading error">Error: ${err.message}</div>`;
   }
-}
-
-function getAirQualityLabel(level) {
-  const labels = {
-    'good': 'GOOD',
-    'moderate': 'MODERATE',
-    'unhealthy-sensitive': 'SENSITIVE',
-    'unhealthy': 'UNHEALTHY',
-    'very-unhealthy': 'VERY UNHEALTHY',
-    'hazardous': 'HAZARDOUS'
-  };
-  return labels[level] || 'UNKNOWN';
-}
-
-function renderAirPurifier(purifier) {
-  if (purifier.offline) {
-    return `
-      <div class="purifier-item offline" data-id="${purifier.id}">
-        <div class="purifier-header">
-          <i data-lucide="wind"></i>
-          <span class="purifier-name">${purifier.name}</span>
-          <span class="status-badge offline">OFFLINE</span>
-        </div>
-      </div>
-    `;
-  }
-
-  const aqColor = purifier.airQuality?.color || '#666';
-  const aqLevel = purifier.airQuality?.level || 'unknown';
-  const pm25Display = purifier.pm25 !== null ? purifier.pm25 : '--';
-
-  return `
-    <div class="purifier-item ${purifier.power ? 'on' : 'off'}" data-id="${purifier.id}">
-      <div class="purifier-header">
-        <i data-lucide="wind"></i>
-        <span class="purifier-name">${purifier.name}</span>
-        <span class="status-badge ${purifier.power ? 'online' : 'offline'}">
-          ${purifier.power ? 'ON' : 'OFF'}
-        </span>
-      </div>
-      <div class="purifier-stats">
-        <div class="purifier-stat main">
-          <span class="stat-value" style="color: ${aqColor}">${pm25Display}</span>
-          <span class="stat-label">PM2.5</span>
-          <span class="stat-quality" style="background: ${aqColor}">${getAirQualityLabel(aqLevel)}</span>
-        </div>
-        ${purifier.humidity !== null ? `
-          <div class="purifier-stat">
-            <i data-lucide="droplets"></i>
-            <span class="stat-value">${purifier.humidity}%</span>
-          </div>
-        ` : ''}
-        ${purifier.temperature !== null ? `
-          <div class="purifier-stat">
-            <i data-lucide="thermometer"></i>
-            <span class="stat-value">${purifier.temperature}°C</span>
-          </div>
-        ` : ''}
-        ${purifier.fanSpeed ? `
-          <div class="purifier-stat">
-            <i data-lucide="gauge"></i>
-            <span class="stat-value">${purifier.fanSpeed}</span>
-          </div>
-        ` : ''}
-      </div>
-    </div>
-  `;
-}
-
-async function loadAirPurifiers() {
-  const content = $('#airpurifier-content');
-
-  try {
-    const devices = await API.airpurifier.devices();
-    airPurifiers = devices;
-
-    if (devices.length === 0) {
-      content.innerHTML = `
-        <div class="device-info">
-          <div class="info-row">
-            <span class="label">STATUS:</span>
-            <span class="status-badge offline">NO DEVICES</span>
-          </div>
-          <p style="margin-top: 12px; color: var(--text-dim)">
-            Click the search icon to discover air purifiers
-          </p>
-        </div>
-      `;
-      return;
-    }
-
-    content.innerHTML = `
-      <div class="purifier-list">
-        ${devices.map(p => renderAirPurifier(p)).join('')}
-      </div>
-    `;
-    lucide.createIcons();
-  } catch (err) {
-    content.innerHTML = `<div class="loading error">Error: ${err.message}</div>`;
-  }
-}
-
-function updateAirPurifiers(devices) {
-  airPurifiers = devices;
-  const content = $('#airpurifier-content');
-
-  if (devices.length === 0) {
-    return;
-  }
-
-  content.innerHTML = `
-    <div class="purifier-list">
-      ${devices.map(p => renderAirPurifier(p)).join('')}
-    </div>
-  `;
-  lucide.createIcons();
 }
 
 function getBatteryIcon(level) {
@@ -798,13 +917,21 @@ function renderRoombaPanel(status) {
 async function loadRoomba() {
   const content = $('#roomba-content');
   const controls = $('#roomba-controls');
+  const panel = $('#roomba-panel');
 
   try {
     const status = await API.roomba.status();
     roombaStatus = status;
     content.innerHTML = renderRoombaPanel(status);
     controls.innerHTML = renderRoombaHeaderControls(status);
+
+    const titleEl = panel.querySelector('.panel-title');
+    if (titleEl) {
+      titleEl.textContent = getPanelDisplayName('roomba', 'ROOMBA');
+    }
+
     lucide.createIcons();
+    attachEditableTitles();
   } catch (err) {
     content.innerHTML = `<div class="loading error">Error: ${err.message}</div>`;
     controls.innerHTML = '';
@@ -815,10 +942,40 @@ function updateRoomba(status) {
   roombaStatus = status;
   const content = $('#roomba-content');
   const controls = $('#roomba-controls');
+  const panel = $('#roomba-panel');
   const fullStatus = { configured: true, ...status };
   content.innerHTML = renderRoombaPanel(fullStatus);
   controls.innerHTML = renderRoombaHeaderControls(fullStatus);
+
+  const titleEl = panel.querySelector('.panel-title');
+  if (titleEl) {
+    titleEl.textContent = getPanelDisplayName('roomba', 'ROOMBA');
+  }
+
   lucide.createIcons();
+  attachEditableTitles();
+}
+
+function updatePm25Sensors(sensors) {
+  pm25Sensors = sensors || [];
+  const sensorsContent = $('#sensors-content');
+  if (!sensorsContent) {
+    return;
+  }
+
+  const existingHtml = sensorsContent.innerHTML;
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = existingHtml;
+
+  const existingPm25 = tempDiv.querySelectorAll('.sensor-pm25');
+  existingPm25.forEach(el => el.remove());
+
+  let pm25Html = '';
+  pm25Sensors.forEach(s => { pm25Html += renderSensorPanel(s); });
+
+  sensorsContent.innerHTML = tempDiv.innerHTML + pm25Html;
+  lucide.createIcons();
+  attachEditableTitles();
 }
 
 async function startRoomba() {
@@ -856,6 +1013,276 @@ async function dockRoomba() {
     log(`Failed to dock Roomba: ${err.message}`, 'error');
   }
 }
+
+// Air Purifier Functions
+function getAirQualityLabel(iaql) {
+  if (iaql <= 3) {
+    return 'GOOD';
+  }
+  if (iaql <= 6) {
+    return 'MODERATE';
+  }
+  if (iaql <= 9) {
+    return 'POOR';
+  }
+  return 'VERY POOR';
+}
+
+function getAirQualityClass(iaql) {
+  if (iaql <= 3) {
+    return 'good';
+  }
+  if (iaql <= 6) {
+    return 'moderate';
+  }
+  if (iaql <= 9) {
+    return 'poor';
+  }
+  return 'very-poor';
+}
+
+function getModeLabel(mode) {
+  const modes = {
+    'M': 'MANUAL',
+    'AG': 'AUTO GENERAL',
+    'AL': 'ALLERGEN',
+    'T': 'TURBO',
+    'S': 'SLEEP'
+  };
+  return modes[mode] || mode;
+}
+
+function getFanLabel(om) {
+  if (om === 's') {
+    return 'SLEEP';
+  }
+  if (om === 't') {
+    return 'TURBO';
+  }
+  return 'SPEED ' + om;
+}
+
+function renderFilterStatus(fltsts, flttotal, label) {
+  const percent = flttotal > 0 ? Math.round((fltsts / flttotal) * 100) : 0;
+  const statusClass = percent > 30 ? 'good' : percent > 10 ? 'warning' : 'critical';
+  return '<div class="info-row">' +
+    '<span class="label">' + label + ':</span>' +
+    '<span class="value filter-value">' +
+    '<div class="filter-bar">' +
+    '<div class="filter-fill ' + statusClass + '" style="width: ' + percent + '%"></div>' +
+    '</div>' +
+    '<span class="filter-percent">' + percent + '%</span>' +
+    '</span>' +
+    '</div>';
+}
+
+function renderAirPurifierDevice(device, index) {
+  const defaultName = (device.device && device.device.name) || ('Purifier ' + (index + 1));
+  const panelKey = 'airpurifier:' + index;
+  const displayName = getPanelDisplayName(panelKey, defaultName);
+  const ip = device.device && device.device.ip;
+
+  if (!device.connected) {
+    return '<section class="panel" data-panel-key="' + panelKey + '" data-default-name="' + defaultName + '">' +
+      '<div class="panel-header">' +
+      '<i data-lucide="wind"></i>' +
+      '<span class="panel-title">' + displayName + '</span>' +
+      '<span class="status-badge offline">OFFLINE</span>' +
+      '</div>' +
+      '<div class="panel-content">' +
+      '<p class="purifier-ip">' + (ip || 'Unknown') + '</p>' +
+      '<button class="btn btn-sm" onclick="connectPurifier(' + index + ')">CONNECT</button>' +
+      '</div>' +
+      '</section>';
+  }
+
+  const hasStatus = device.pwr !== undefined;
+  if (!hasStatus) {
+    return '<section class="panel" data-panel-key="' + panelKey + '" data-default-name="' + defaultName + '">' +
+      '<div class="panel-header">' +
+      '<i data-lucide="wind"></i>' +
+      '<span class="panel-title">' + displayName + '</span>' +
+      '</div>' +
+      '<div class="panel-content">' +
+      '<div class="loading">Connecting...</div>' +
+      '</div>' +
+      '</section>';
+  }
+
+  const isOn = device.pwr === '1';
+  const iaql = device.iaql !== undefined ? device.iaql : null;
+  const mode = device.mode || 'M';
+  const om = device.om || '1';
+  const qualityClass = iaql !== null ? getAirQualityClass(iaql) : '';
+
+  return '<section class="panel" data-panel-key="' + panelKey + '" data-default-name="' + defaultName + '">' +
+    '<div class="panel-header">' +
+    '<i data-lucide="wind"></i>' +
+    '<span class="panel-title">' + displayName + '</span>' +
+    '<button class="btn-icon ' + (isOn ? 'active' : '') + '" onclick="togglePurifierPower(' + index + ')" title="' + (isOn ? 'Turn Off' : 'Turn On') + '">' +
+    '<i data-lucide="power"></i>' +
+    '</button>' +
+    '</div>' +
+    '<div class="panel-content">' +
+    '<div class="device-info">' +
+    '<div class="info-row">' +
+    '<span class="label">AIR QUALITY:</span>' +
+    '<span class="status-badge ' + qualityClass + '">' + (iaql !== null ? getAirQualityLabel(iaql) : '--') + '</span>' +
+    '</div>' +
+    '<div class="info-row">' +
+    '<span class="label">MODE:</span>' +
+    '<select class="control-select" onchange="setPurifierMode(' + index + ', this.value)" ' + (!isOn ? 'disabled' : '') + '>' +
+    '<option value="M" ' + (mode === 'M' ? 'selected' : '') + '>MANUAL</option>' +
+    '<option value="AG" ' + (mode === 'AG' ? 'selected' : '') + '>AUTO</option>' +
+    '<option value="AL" ' + (mode === 'AL' ? 'selected' : '') + '>ALLERGEN</option>' +
+    '<option value="S" ' + (mode === 'S' ? 'selected' : '') + '>SLEEP</option>' +
+    '<option value="T" ' + (mode === 'T' ? 'selected' : '') + '>TURBO</option>' +
+    '</select>' +
+    '</div>' +
+    '<div class="info-row">' +
+    '<span class="label">FAN:</span>' +
+    '<select class="control-select" onchange="setPurifierFan(' + index + ', this.value)" ' + (!isOn || mode !== 'M' ? 'disabled' : '') + '>' +
+    '<option value="s" ' + (om === 's' ? 'selected' : '') + '>SLEEP</option>' +
+    '<option value="1" ' + (om === '1' ? 'selected' : '') + '>1</option>' +
+    '<option value="2" ' + (om === '2' ? 'selected' : '') + '>2</option>' +
+    '<option value="3" ' + (om === '3' ? 'selected' : '') + '>3</option>' +
+    '<option value="t" ' + (om === 't' ? 'selected' : '') + '>TURBO</option>' +
+    '</select>' +
+    '</div>' +
+    (device.flttotal0 > 0 ? renderFilterStatus(device.fltsts0 || 0, device.flttotal0, 'PRE-FILTER') : '') +
+    (device.flttotal1 > 0 ? renderFilterStatus(device.fltsts1 || 0, device.flttotal1, 'HEPA') : '') +
+    (device.flttotal2 > 0 && device.fltsts2 > 0 ? renderFilterStatus(device.fltsts2, device.flttotal2, 'CARBON') : '') +
+    '</div>' +
+    '</div>' +
+    '</section>';
+}
+
+function renderAirPurifierPanel(devices) {
+  if (!devices || devices.length === 0) {
+    return '';
+  }
+
+  return devices.map(function(device, index) { return renderAirPurifierDevice(device, index); }).join('');
+}
+
+async function loadAirPurifiers() {
+  const content = document.getElementById('airpurifier-content');
+
+  try {
+    const devices = await API.airpurifier.devices();
+    content.innerHTML = renderAirPurifierPanel(devices);
+    lucide.createIcons();
+    attachEditableTitles();
+  } catch (err) {
+    content.innerHTML = '<div class="error">Failed to load: ' + err.message + '</div>';
+  }
+}
+
+function updateAirPurifier(data) {
+  loadAirPurifiers();
+}
+
+async function togglePurifierPower(index) {
+  try {
+    const devices = await API.airpurifier.devices();
+    const device = devices[index];
+    const isOn = device && device.pwr === '1';
+    await API.airpurifier.power(index, !isOn);
+    log('Purifier ' + (index + 1) + ' turned ' + (isOn ? 'off' : 'on'), 'success');
+  } catch (err) {
+    log('Failed to toggle purifier: ' + err.message, 'error');
+  }
+}
+
+async function setPurifierMode(index, mode) {
+  try {
+    await API.airpurifier.mode(index, mode);
+    log('Purifier ' + (index + 1) + ' mode set to ' + getModeLabel(mode), 'success');
+  } catch (err) {
+    log('Failed to set mode: ' + err.message, 'error');
+  }
+}
+
+async function setPurifierFan(index, speed) {
+  try {
+    await API.airpurifier.fan(index, speed);
+    log('Purifier ' + (index + 1) + ' fan set to ' + getFanLabel(speed), 'success');
+  } catch (err) {
+    log('Failed to set fan speed: ' + err.message, 'error');
+  }
+}
+
+async function connectPurifier(index) {
+  try {
+    await API.airpurifier.connect(index);
+    log('Connecting to purifier ' + (index + 1) + '...', 'info');
+    await loadAirPurifiers();
+  } catch (err) {
+    log('Failed to connect: ' + err.message, 'error');
+  }
+}
+
+async function addPurifier() {
+  showModal('ADD AIR PURIFIER',
+    '<div class="form-group">' +
+    '<label>Device IP Address:</label>' +
+    '<input type="text" id="purifier-ip" placeholder="192.168.1.xxx" class="input-field">' +
+    '</div>' +
+    '<div class="form-group">' +
+    '<label>Device Name (optional):</label>' +
+    '<input type="text" id="purifier-name" placeholder="Living Room Purifier" class="input-field">' +
+    '</div>',
+    '<button class="btn" onclick="hideModal()">CANCEL</button>' +
+    '<button class="btn btn-start" onclick="confirmAddPurifier()">ADD</button>'
+  );
+}
+
+async function confirmAddPurifier() {
+  const ip = document.getElementById('purifier-ip').value.trim();
+  const name = document.getElementById('purifier-name').value.trim();
+
+  if (!ip) {
+    log('Please enter an IP address', 'error');
+    return;
+  }
+
+  showModal('ADDING DEVICE', '<div class="loading">Connecting to device...</div>');
+
+  try {
+    const result = await API.airpurifier.add(ip, name);
+    if (result.success) {
+      hideModal();
+      log('Air purifier added at ' + ip, 'success');
+      await loadAirPurifiers();
+    } else {
+      showModal('FAILED', '<p class="error">' + result.error + '</p>',
+        '<button class="btn" onclick="hideModal()">CLOSE</button>');
+    }
+  } catch (err) {
+    showModal('ERROR', '<p class="error">' + err.message + '</p>',
+      '<button class="btn" onclick="hideModal()">CLOSE</button>');
+  }
+}
+
+async function removePurifier(index) {
+  showModal('REMOVE PURIFIER',
+    '<p>Are you sure you want to remove this air purifier?</p>',
+    '<button class="btn" onclick="hideModal()">CANCEL</button>' +
+    '<button class="btn btn-danger" onclick="confirmRemovePurifier(' + index + ')">REMOVE</button>'
+  );
+}
+
+async function confirmRemovePurifier(index) {
+  try {
+    await API.airpurifier.remove(index);
+    hideModal();
+    log('Air purifier removed', 'success');
+    await loadAirPurifiers();
+  } catch (err) {
+    log('Failed to remove purifier: ' + err.message, 'error');
+  }
+}
+
 
 function formatRemainingTime(seconds) {
   if (!seconds) {
@@ -958,6 +1385,8 @@ function renderHomeConnectPanel(device) {
   const icon = getApplianceIcon(device.type);
   const status = device.status || {};
   const stateDisplay = getOperationStateDisplay(status.operationState);
+  const panelKey = `homeconnect:${device.id}`;
+  const displayName = getPanelDisplayName(panelKey, device.name.toUpperCase());
 
   let contentHtml = '';
 
@@ -1090,10 +1519,10 @@ function renderHomeConnectPanel(device) {
   }
 
   return `
-    <section class="panel homeconnect-device-panel" data-device-id="${device.id}">
+    <section class="panel homeconnect-device-panel" data-device-id="${device.id}" data-panel-key="${panelKey}" data-default-name="${device.name.toUpperCase()}">
       <div class="panel-header">
         <i data-lucide="${icon}"></i>
-        <span>${device.name.toUpperCase()}</span>
+        <span class="panel-title">${displayName}</span>
         <button class="btn-icon refresh-homeconnect" title="Refresh">
           <i data-lucide="refresh-cw"></i>
         </button>
@@ -1183,6 +1612,7 @@ async function loadHomeConnect() {
     appendToDevicesRow(devices.map(d => renderHomeConnectPanel(d)).join(''));
     lucide.createIcons();
     attachHomeConnectRefreshHandlers();
+    attachEditableTitles();
   } catch (err) {
     appendToDevicesRow(`
       <section class="panel">
@@ -1210,6 +1640,7 @@ function updateHomeConnect(devices) {
   appendToDevicesRow(devices.map(d => renderHomeConnectPanel(d)).join(''));
   lucide.createIcons();
   attachHomeConnectRefreshHandlers();
+  attachEditableTitles();
 }
 
 async function refreshHomeConnect() {
@@ -1348,8 +1779,23 @@ function getRoomIcon(roomClass) {
   return ROOM_ICONS[roomClass] || 'layout-grid';
 }
 
+function getLast24hValues(history) {
+  if (!history || history.length === 0) {
+    return [];
+  }
+
+  if (typeof history[0] === 'number') {
+    return history;
+  }
+
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  return history.filter(e => e.t >= cutoff).map(e => e.v);
+}
+
 function renderSparkline(history, color) {
-  if (!history || history.length < 2) {
+  const values = getLast24hValues(history);
+
+  if (values.length < 2) {
     return `
       <div class="sparkline">
         <svg viewBox="0 0 100 100" preserveAspectRatio="none">
@@ -1359,12 +1805,12 @@ function renderSparkline(history, color) {
     `;
   }
 
-  const min = Math.min(...history);
-  const max = Math.max(...history);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
   const range = max - min || 1;
 
-  const points = history.map((val, i) => {
-    const x = (i / (HISTORY_LENGTH - 1)) * 100;
+  const points = values.map((val, i) => {
+    const x = (i / (values.length - 1)) * 100;
     const y = 100 - ((val - min) / range) * 100;
     return `${x},${y}`;
   }).join(' ');
@@ -1381,6 +1827,8 @@ function renderSparkline(history, color) {
 function renderSensorPanel(sensor) {
   const icon = CATEGORY_ICONS[sensor.category] || 'radio';
   const typeClass = `sensor-${sensor.category}`;
+  const panelKey = `sensor:${sensor.storageId || sensor.id}`;
+  const displayName = getPanelDisplayName(panelKey, sensor.name);
 
   let value = '--';
   let unit = '';
@@ -1399,6 +1847,12 @@ function renderSensorPanel(sensor) {
     unit = ' lux';
   } else if (sensor.category === 'switch') {
     value = 'READY';
+  } else if (sensor.category === 'pm25' && sensor.state.pm25 !== undefined) {
+    value = sensor.state.pm25;
+    unit = ' µg/m³';
+    if (sensor.dailyStats) {
+      minMax = `<span class="sensor-minmax">${sensor.dailyStats.min} / ${sensor.dailyStats.max}</span>`;
+    }
   }
 
   const activeClass = (sensor.category === 'motion' && sensor.state.presence) ? 'active' : '';
@@ -1407,7 +1861,8 @@ function renderSensorPanel(sensor) {
     temperature: '#ff6b35',
     motion: sensor.state.presence ? '#00ff88' : '#00d4ff',
     lightlevel: '#ffd700',
-    switch: '#b388ff'
+    switch: '#b388ff',
+    pm25: '#00d4ff'
   };
   const sparklineColor = colorMap[sensor.category] || '#ff8c00';
 
@@ -1424,10 +1879,10 @@ function renderSensorPanel(sensor) {
   }
 
   return `
-    <section class="sensor-panel ${typeClass} ${activeClass}">
+    <section class="sensor-panel ${typeClass} ${activeClass}" data-panel-key="${panelKey}" data-default-name="${sensor.name}">
       <div class="sensor-header">
         <i data-lucide="${icon}"></i>
-        <span>${sensor.name}</span>
+        <span class="panel-title">${displayName}</span>
       </div>
       <div class="sensor-content">
         <div class="sensor-main">
@@ -1452,6 +1907,7 @@ function renderSensorPanels(sensors) {
   motionSensors.forEach(s => { html += renderSensorPanel(s); });
   lightSensors.forEach(s => { html += renderSensorPanel(s); });
   switches.forEach(s => { html += renderSensorPanel(s); });
+  pm25Sensors.forEach(s => { html += renderSensorPanel(s); });
 
   return html;
 }
@@ -1523,12 +1979,14 @@ async function loadRooms() {
     let html = regularRooms.map(room => {
       const showNanoleaf = nanoleafConfig?.roomId?.toLowerCase() === room.name.toLowerCase();
       const roomIcon = getRoomIcon(room.class);
+      const panelKey = `room:${room.id}`;
+      const displayName = getPanelDisplayName(panelKey, room.name.toUpperCase());
 
       return `
-        <section class="panel room-panel">
+        <section class="panel room-panel" data-panel-key="${panelKey}" data-default-name="${room.name.toUpperCase()}">
           <div class="panel-header">
             <i data-lucide="${roomIcon}"></i>
-            <span>${room.name.toUpperCase()}</span>
+            <span class="panel-title">${displayName}</span>
             <button class="btn-icon refresh-room" title="Refresh">
               <i data-lucide="refresh-cw"></i>
             </button>
@@ -1565,6 +2023,7 @@ async function loadRooms() {
     content.innerHTML = html;
 
     lucide.createIcons();
+    attachEditableTitles();
 
     $$('.refresh-room').forEach(el => {
       el.addEventListener('click', loadRooms);
@@ -1948,75 +2407,6 @@ async function confirmPairNanoleaf(ip, port) {
   }
 }
 
-async function discoverAirPurifier() {
-  showModal('DISCOVERING AIR PURIFIERS', '<div class="loading">Scanning network (10 seconds)...</div>');
-  log('Scanning for air purifiers...');
-
-  try {
-    const devices = await API.airpurifier.discover();
-
-    showModal('ADD AIR PURIFIER', `
-      <p style="margin-bottom: 12px; color: var(--text-dim)">
-        Enter the IP address of your Philips air purifier:
-      </p>
-      <div class="input-row">
-        <input type="text" id="purifier-ip" placeholder="192.168.1.xxx" class="modal-input">
-      </div>
-      ${devices.length > 0 ? `
-        <p style="margin-top: 16px; margin-bottom: 8px">Or select a discovered device:</p>
-        <div class="device-list">
-          ${devices.map(d => `
-            <div class="device-item" onclick="pairAirPurifier('${d.ip}')">
-              <i data-lucide="wind"></i>
-              <span class="name">${d.name}</span>
-              <span class="ip">${d.ip}</span>
-            </div>
-          `).join('')}
-        </div>
-      ` : ''}
-    `, `
-      <button class="btn" onclick="hideModal()">CANCEL</button>
-      <button class="btn btn-start" onclick="pairAirPurifierFromInput()">CONNECT</button>
-    `);
-    lucide.createIcons();
-  } catch (err) {
-    showModal('ERROR', `<p class="error">${err.message}</p>`,
-      '<button class="btn" onclick="hideModal()">CLOSE</button>');
-  }
-}
-
-function pairAirPurifierFromInput() {
-  const ip = $('#purifier-ip').value.trim();
-  if (ip) {
-    pairAirPurifier(ip);
-  }
-}
-
-async function pairAirPurifier(ip) {
-  showModal('CONNECTING...', '<div class="loading">Connecting to air purifier...</div>');
-
-  try {
-    const result = await API.airpurifier.pair(ip);
-
-    if (result.success) {
-      hideModal();
-      log(`Air purifier paired: ${result.config.name}`, 'success');
-      await loadAirPurifiers();
-    } else {
-      showModal('CONNECTION FAILED', `
-        <p class="error">${result.error}</p>
-        <p style="margin-top: 12px">Make sure the purifier is on the same network and powered on.</p>
-      `, `
-        <button class="btn" onclick="hideModal()">CANCEL</button>
-        <button class="btn btn-start" onclick="discoverAirPurifier()">RETRY</button>
-      `);
-    }
-  } catch (err) {
-    showModal('ERROR', `<p class="error">${err.message}</p>`,
-      '<button class="btn" onclick="hideModal()">CLOSE</button>');
-  }
-}
-
 async function init() {
   lucide.createIcons();
   updateClock();
@@ -2024,19 +2414,18 @@ async function init() {
 
   connectWebSocket();
 
+  await loadPanelNames();
   await loadSyncConfig();
   await Promise.all([
     loadHueBridge(),
     loadNanoleaf(),
-    loadAirPurifiers(),
     loadHomeConnect(),
     loadRoomba(),
+    loadAirPurifiers(),
     loadRooms()
   ]);
 
   $('#discover-hue').addEventListener('click', discoverHue);
-  $('#discover-nanoleaf').addEventListener('click', discoverNanoleaf);
-  $('#discover-airpurifier').addEventListener('click', discoverAirPurifier);
   $('#modal-close').addEventListener('click', hideModal);
   $('#sync-source-select').addEventListener('change', onSourceSelectChange);
 
@@ -2089,9 +2478,6 @@ window.pairHue = pairHue;
 window.confirmPairHue = confirmPairHue;
 window.pairNanoleaf = pairNanoleaf;
 window.confirmPairNanoleaf = confirmPairNanoleaf;
-window.pairAirPurifier = pairAirPurifier;
-window.pairAirPurifierFromInput = pairAirPurifierFromInput;
-window.discoverAirPurifier = discoverAirPurifier;
 window.configureHomeConnect = configureHomeConnect;
 window.startHomeConnectAuth = startHomeConnectAuth;
 window.disconnectHomeConnect = disconnectHomeConnect;
@@ -2099,5 +2485,13 @@ window.startRoomba = startRoomba;
 window.pauseRoomba = pauseRoomba;
 window.resumeRoomba = resumeRoomba;
 window.dockRoomba = dockRoomba;
+window.togglePurifierPower = togglePurifierPower;
+window.setPurifierMode = setPurifierMode;
+window.setPurifierFan = setPurifierFan;
+window.connectPurifier = connectPurifier;
+window.addPurifier = addPurifier;
+window.confirmAddPurifier = confirmAddPurifier;
+window.removePurifier = removePurifier;
+window.confirmRemovePurifier = confirmRemovePurifier;
 
 document.addEventListener('DOMContentLoaded', init);

@@ -118,6 +118,53 @@ body {
   color: var(--success);
 }
 
+.ekg-monitor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #0a0a0a;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 4px 8px;
+}
+
+.ekg-monitor svg {
+  width: 100px;
+  height: 24px;
+}
+
+.ekg-monitor polyline {
+  stroke: var(--success);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 2px var(--success));
+  vector-effect: non-scaling-stroke;
+}
+
+#ekg-latency {
+  font-size: 12px;
+  color: var(--success);
+  min-width: 40px;
+  text-align: right;
+}
+
+.ekg-monitor.disconnected polyline {
+  stroke: var(--error);
+  filter: drop-shadow(0 0 2px var(--error));
+}
+
+.ekg-monitor.disconnected #ekg-latency {
+  color: var(--error);
+}
+
+.ekg-monitor.high-latency polyline {
+  stroke: var(--warning);
+  filter: drop-shadow(0 0 2px var(--warning));
+}
+
+.ekg-monitor.high-latency #ekg-latency {
+  color: var(--warning);
+}
+
 .clock {
   font-size: 18px;
   color: var(--text-dim);
@@ -184,6 +231,28 @@ body {
 .panel-header .header-controls .btn-icon i {
   width: 14px;
   height: 14px;
+}
+
+.editable-title {
+  cursor: text;
+}
+
+.editable-title:hover {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
+.inline-edit-input {
+  font-family: 'VT323', monospace;
+  font-size: inherit;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  padding: 0 4px;
+  outline: none;
+  width: 150px;
+  letter-spacing: 1px;
 }
 
 .panel-content {
@@ -502,9 +571,13 @@ body {
 }
 
 .btn-icon.active {
-  background: var(--primary);
-  color: var(--bg);
-  border-color: var(--primary);
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.btn-icon.active:hover:not(:disabled) {
+  color: var(--error);
+  border-color: var(--error);
 }
 
 .sparkline {
@@ -1086,6 +1159,26 @@ select optgroup {
   color: #000;
 }
 
+.status-badge.good {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.status-badge.moderate {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.status-badge.poor {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.status-badge.very-poor {
+  border-color: #ff0000;
+  color: #ff0000;
+}
+
 .progress-bar-container {
   display: flex;
   align-items: center;
@@ -1158,4 +1251,259 @@ select optgroup {
   .rooms-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Air Purifier Panel */
+.purifier-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.purifier-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.purifier-card.on {
+  border-color: var(--success);
+  box-shadow: 0 0 8px rgba(0, 255, 136, 0.2);
+}
+
+.purifier-card.offline {
+  opacity: 0.7;
+}
+
+.purifier-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.purifier-name {
+  font-size: 14px;
+  letter-spacing: 1px;
+  color: var(--text-bright);
+}
+
+.purifier-status {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.purifier-body {
+  padding: 12px;
+}
+
+.purifier-ip {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+
+.purifier-readings {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.reading {
+  flex: 1;
+  text-align: center;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.reading-label {
+  display: block;
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+
+.reading-value {
+  display: block;
+  font-size: 18px;
+  font-weight: bold;
+  color: var(--text-bright);
+}
+
+.reading-unit {
+  font-size: 10px;
+  font-weight: normal;
+  color: var(--text-dim);
+  margin-left: 2px;
+}
+
+.reading.pm25 .reading-value {
+  color: var(--accent);
+}
+
+.reading.iaql.good .reading-value {
+  color: var(--success);
+}
+
+.reading.iaql.moderate .reading-value {
+  color: var(--warning);
+}
+
+.reading.iaql.poor .reading-value {
+  color: var(--error);
+}
+
+.reading.iaql.very-poor .reading-value {
+  color: #ff0000;
+}
+
+.purifier-controls {
+  margin-bottom: 16px;
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.control-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  min-width: 50px;
+}
+
+.control-select {
+  flex: 1;
+  font-family: 'VT323', monospace;
+  font-size: 14px;
+  padding: 4px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.control-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.filter-status {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.filter-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.filter-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  min-width: 70px;
+}
+
+.filter-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.filter-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.filter-fill.good {
+  background: var(--success);
+}
+
+.filter-fill.warning {
+  background: var(--warning);
+}
+
+.filter-fill.critical {
+  background: var(--error);
+}
+
+.filter-percent {
+  font-size: 10px;
+  color: var(--text-dim);
+  min-width: 30px;
+  text-align: right;
+}
+
+.filter-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.btn-sm {
+  font-size: 12px;
+  padding: 4px 10px;
+  margin-right: 8px;
+}
+
+.btn-danger {
+  background: transparent;
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.btn-danger:hover {
+  background: var(--error);
+  color: var(--bg);
+}
+
+.empty-state {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-dim);
+}
+
+.empty-state .btn {
+  margin-top: 12px;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.input-field {
+  width: 100%;
+  font-family: 'VT323', monospace;
+  font-size: 16px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  outline: none;
+}
+
+.input-field:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 4px var(--accent);
 }

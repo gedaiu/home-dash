@@ -3,71 +3,165 @@ const airpurifierService = require('../services/airpurifier');
 
 const router = express.Router();
 
-const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+function asyncHandler(fn) {
+  return (req, res, next) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
 
-router.get('/discover', asyncHandler(async (req, res) => {
-  const devices = await airpurifierService.discover();
-  res.json(devices);
-}));
-
-router.get('/discover/deep', asyncHandler(async (req, res) => {
-  const subnet = req.query.subnet || '192.168.1';
-  const devices = await airpurifierService.discoverDeep(subnet);
-  res.json(devices);
-}));
+function getIndex(req) {
+  const index = parseInt(req.params.index, 10);
+  if (isNaN(index) || index < 0) {
+    return null;
+  }
+  return index;
+}
 
 router.get('/devices', asyncHandler(async (req, res) => {
-  const statuses = await airpurifierService.getAllStatuses();
+  const statuses = airpurifierService.getAllStatuses();
   res.json(statuses);
 }));
 
-router.get('/devices/:id', asyncHandler(async (req, res) => {
-  const status = await airpurifierService.getStatus(req.params.id);
-  if (!status) {
-    return res.status(404).json({ error: 'Purifier not found' });
+router.get('/devices/:index/status', asyncHandler(async (req, res) => {
+  const index = getIndex(req);
+  if (index === null) {
+    return res.status(400).json({ error: 'Invalid device index' });
   }
+
+  const status = airpurifierService.getStatus(index);
   res.json(status);
 }));
 
-router.post('/devices/pair', asyncHandler(async (req, res) => {
-  const { ip } = req.body;
+router.post('/devices', asyncHandler(async (req, res) => {
+  const { ip, name } = req.body;
+
   if (!ip) {
-    return res.status(400).json({ error: 'IP address required' });
+    return res.status(400).json({ error: 'IP address is required' });
   }
-  const result = await airpurifierService.pair(ip);
+
+  const result = await airpurifierService.configure(ip, name);
   res.json(result);
 }));
 
-router.delete('/devices/:id', (req, res) => {
-  airpurifierService.remove(req.params.id);
-  res.json({ success: true });
-});
-
-router.put('/devices/:id/name', asyncHandler(async (req, res) => {
-  const { name } = req.body;
-  if (!name) {
-    return res.status(400).json({ error: 'Name required' });
+router.delete('/devices/:index', asyncHandler(async (req, res) => {
+  const index = getIndex(req);
+  if (index === null) {
+    return res.status(400).json({ error: 'Invalid device index' });
   }
-  airpurifierService.updateName(req.params.id, name);
+
+  airpurifierService.remove(index);
   res.json({ success: true });
 }));
 
-router.post('/devices/:id/power', asyncHandler(async (req, res) => {
+router.post('/devices/:index/connect', asyncHandler(async (req, res) => {
+  const index = getIndex(req);
+  if (index === null) {
+    return res.status(400).json({ error: 'Invalid device index' });
+  }
+
+  await airpurifierService.connect(index);
+  await airpurifierService.startPolling(index);
+  res.json({ success: true });
+}));
+
+router.post('/devices/:index/disconnect', asyncHandler(async (req, res) => {
+  const index = getIndex(req);
+  if (index === null) {
+    return res.status(400).json({ error: 'Invalid device index' });
+  }
+
+  airpurifierService.stopPolling(index);
+  res.json({ success: true });
+}));
+
+router.post('/devices/:index/power', asyncHandler(async (req, res) => {
+  const index = getIndex(req);
+  if (index === null) {
+    return res.status(400).json({ error: 'Invalid device index' });
+  }
+
   const { on } = req.body;
-  await airpurifierService.setPower(req.params.id, on);
-  res.json({ success: true });
+  if (typeof on !== 'boolean') {
+    return res.status(400).json({ error: 'on (boolean) is required' });
+  }
+
+  await airpurifierService.setPower(index, on);
+  res.json({ success: true, power: on });
 }));
 
-router.post('/devices/:id/mode', asyncHandler(async (req, res) => {
+router.post('/devices/:index/mode', asyncHandler(async (req, res) => {
+  const index = getIndex(req);
+  if (index === null) {
+    return res.status(400).json({ error: 'Invalid device index' });
+  }
+
   const { mode } = req.body;
-  await airpurifierService.setMode(req.params.id, mode);
-  res.json({ success: true });
+  if (!mode) {
+    return res.status(400).json({ error: 'mode is required (M, AG, AL, T, S)' });
+  }
+
+  await airpurifierService.setMode(index, mode);
+  res.json({ success: true, mode });
 }));
 
-router.post('/devices/:id/fan', asyncHandler(async (req, res) => {
+router.post('/devices/:index/fan', asyncHandler(async (req, res) => {
+  const index = getIndex(req);
+  if (index === null) {
+    return res.status(400).json({ error: 'Invalid device index' });
+  }
+
   const { speed } = req.body;
-  await airpurifierService.setFanSpeed(req.params.id, speed);
-  res.json({ success: true });
+  if (speed === undefined) {
+    return res.status(400).json({ error: 'speed is required (1, 2, 3, s, t)' });
+  }
+
+  await airpurifierService.setFanSpeed(index, speed);
+  res.json({ success: true, speed });
+}));
+
+router.post('/devices/:index/childlock', asyncHandler(async (req, res) => {
+  const index = getIndex(req);
+  if (index === null) {
+    return res.status(400).json({ error: 'Invalid device index' });
+  }
+
+  const { on } = req.body;
+  if (typeof on !== 'boolean') {
+    return res.status(400).json({ error: 'on (boolean) is required' });
+  }
+
+  await airpurifierService.setChildLock(index, on);
+  res.json({ success: true, childLock: on });
+}));
+
+router.post('/devices/:index/light', asyncHandler(async (req, res) => {
+  const index = getIndex(req);
+  if (index === null) {
+    return res.status(400).json({ error: 'Invalid device index' });
+  }
+
+  const { brightness } = req.body;
+  if (typeof brightness !== 'number' || brightness < 0 || brightness > 100) {
+    return res.status(400).json({ error: 'brightness (0-100) is required' });
+  }
+
+  await airpurifierService.setLight(index, brightness);
+  res.json({ success: true, brightness });
+}));
+
+router.post('/devices/:index/buttonlight', asyncHandler(async (req, res) => {
+  const index = getIndex(req);
+  if (index === null) {
+    return res.status(400).json({ error: 'Invalid device index' });
+  }
+
+  const { on } = req.body;
+  if (typeof on !== 'boolean') {
+    return res.status(400).json({ error: 'on (boolean) is required' });
+  }
+
+  await airpurifierService.setButtonLight(index, on);
+  res.json({ success: true, buttonLight: on });
 }));
 
 module.exports = router;

@@ -6,6 +6,7 @@ const CONFIG_FILE = path.join(__dirname, isTest ? '../../data/test-config.json' 
 const DATA_DIR = path.join(__dirname, '../../data');
 const SENSORS_DIR = path.join(DATA_DIR, 'sensors');
 const LOGS_DIR = path.join(DATA_DIR, 'logs');
+const PANEL_NAMES_FILE = path.join(DATA_DIR, 'panel-names.json');
 
 let configWatcher = null;
 let lastConfigMtime = 0;
@@ -125,18 +126,14 @@ function getSensorFilePath(date, sensorId) {
 
 function load() {
   if (!fs.existsSync(CONFIG_FILE)) {
-    return { hue: null, nanoleaf: null, sync: null, airPurifiers: [] };
+    return { hue: null, nanoleaf: null, sync: null };
   }
 
   try {
     const data = fs.readFileSync(CONFIG_FILE, 'utf-8');
-    const config = JSON.parse(data);
-    if (!config.airPurifiers) {
-      config.airPurifiers = [];
-    }
-    return config;
+    return JSON.parse(data);
   } catch {
-    return { hue: null, nanoleaf: null, sync: null, airPurifiers: [] };
+    return { hue: null, nanoleaf: null, sync: null };
   }
 }
 
@@ -174,31 +171,6 @@ function setSync(syncConfig) {
   save(config);
 }
 
-function getAirPurifiers() {
-  return load().airPurifiers || [];
-}
-
-function getDiscoveredAirPurifierIps() {
-  return load().discoveredAirPurifierIps || [];
-}
-
-function setDiscoveredAirPurifierIps(ips) {
-  const config = load();
-  config.discoveredAirPurifierIps = ips;
-  save(config);
-}
-
-function addDiscoveredAirPurifierIp(ip) {
-  const config = load();
-  const ips = config.discoveredAirPurifierIps || [];
-
-  if (!ips.includes(ip)) {
-    ips.push(ip);
-    config.discoveredAirPurifierIps = ips;
-    save(config);
-  }
-}
-
 function getRoomba() {
   return load().roomba || null;
 }
@@ -219,6 +191,49 @@ function setHomeConnect(homeConnectConfig) {
   save(config);
 }
 
+
+function getAirPurifiers() {
+  const config = load();
+  return config.airPurifiers || [];
+}
+
+function setAirPurifiers(airPurifiers) {
+  const config = load();
+  config.airPurifiers = airPurifiers;
+  save(config);
+}
+
+function getAirPurifier(index) {
+  const purifiers = getAirPurifiers();
+  return purifiers[index] || null;
+}
+
+function addAirPurifier(device) {
+  const purifiers = getAirPurifiers();
+  purifiers.push(device);
+  setAirPurifiers(purifiers);
+  return purifiers.length - 1;
+}
+
+function updateAirPurifier(index, device) {
+  const purifiers = getAirPurifiers();
+  if (index >= 0 && index < purifiers.length) {
+    purifiers[index] = { ...purifiers[index], ...device };
+    setAirPurifiers(purifiers);
+    return true;
+  }
+  return false;
+}
+
+function removeAirPurifier(index) {
+  const purifiers = getAirPurifiers();
+  if (index >= 0 && index < purifiers.length) {
+    purifiers.splice(index, 1);
+    setAirPurifiers(purifiers);
+    return true;
+  }
+  return false;
+}
 function getHomeConnectTokens() {
   const hc = getHomeConnect();
   return hc?.tokens || null;
@@ -257,40 +272,6 @@ function setHomeConnectCache(statuses, lastPollTime) {
   ensureDataDir();
   const cacheFile = getHomeConnectCacheFile();
   fs.writeFileSync(cacheFile, JSON.stringify({ statuses, lastPollTime }, null, 2), 'utf-8');
-}
-
-function getAirPurifier(id) {
-  const purifiers = getAirPurifiers();
-  return purifiers.find(p => p.id === id) || null;
-}
-
-function addAirPurifier(purifierConfig) {
-  const config = load();
-  const existing = config.airPurifiers.findIndex(p => p.id === purifierConfig.id);
-
-  if (existing >= 0) {
-    config.airPurifiers[existing] = purifierConfig;
-  } else {
-    config.airPurifiers.push(purifierConfig);
-  }
-
-  save(config);
-}
-
-function updateAirPurifier(id, updates) {
-  const config = load();
-  const index = config.airPurifiers.findIndex(p => p.id === id);
-
-  if (index >= 0) {
-    config.airPurifiers[index] = { ...config.airPurifiers[index], ...updates };
-    save(config);
-  }
-}
-
-function removeAirPurifier(id) {
-  const config = load();
-  config.airPurifiers = config.airPurifiers.filter(p => p.id !== id);
-  save(config);
 }
 
 function loadSensorFile(date, sensorId) {
@@ -437,6 +418,30 @@ function saveSensorData(history, dailyStats) {
   }
 }
 
+function getPanelNames() {
+  ensureDataDir();
+  if (!fs.existsSync(PANEL_NAMES_FILE)) {
+    return {};
+  }
+  try {
+    return JSON.parse(fs.readFileSync(PANEL_NAMES_FILE, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function setPanelName(key, name) {
+  const names = getPanelNames();
+  names[key] = name;
+  fs.writeFileSync(PANEL_NAMES_FILE, JSON.stringify(names, null, 2), 'utf-8');
+}
+
+function deletePanelName(key) {
+  const names = getPanelNames();
+  delete names[key];
+  fs.writeFileSync(PANEL_NAMES_FILE, JSON.stringify(names, null, 2), 'utf-8');
+}
+
 module.exports = {
   load,
   save,
@@ -446,14 +451,6 @@ module.exports = {
   setNanoleaf,
   getSync,
   setSync,
-  getAirPurifiers,
-  getAirPurifier,
-  addAirPurifier,
-  updateAirPurifier,
-  removeAirPurifier,
-  getDiscoveredAirPurifierIps,
-  setDiscoveredAirPurifierIps,
-  addDiscoveredAirPurifierIp,
   getRoomba,
   setRoomba,
   getHomeConnect,
@@ -462,6 +459,11 @@ module.exports = {
   setHomeConnectTokens,
   getHomeConnectCache,
   setHomeConnectCache,
+  getAirPurifiers,
+  getAirPurifier,
+  addAirPurifier,
+  updateAirPurifier,
+  removeAirPurifier,
   loadSensorData,
   saveSensorData,
   logLightChange,
@@ -472,5 +474,8 @@ module.exports = {
   getMidnightMs,
   onConfigChange,
   startWatching,
-  stopWatching
+  stopWatching,
+  getPanelNames,
+  setPanelName,
+  deletePanelName
 };

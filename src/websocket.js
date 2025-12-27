@@ -1,9 +1,9 @@
 const WebSocket = require('ws');
 const syncService = require('./services/sync');
 const hueService = require('./services/hue');
-const airpurifierService = require('./services/airpurifier');
 const homeconnectService = require('./services/homeconnect');
 const roombaService = require('./services/roomba');
+const airpurifierService = require('./services/airpurifier');
 const storage = require('./services/storage');
 
 let wss = null;
@@ -40,11 +40,10 @@ function init(server) {
 
   syncService.setBroadcast(broadcast);
   hueService.setBroadcast(broadcast);
-  airpurifierService.setBroadcast(broadcast);
   homeconnectService.setBroadcast(broadcast);
   roombaService.setBroadcast(broadcast);
+  airpurifierService.setBroadcast(broadcast);
   hueService.startPolling();
-  airpurifierService.startPolling();
   homeconnectService.startPolling();
   roombaService.startPolling();
 
@@ -56,14 +55,14 @@ function handleConfigChange(config) {
   console.log('[websocket] Config changed, reloading services...');
 
   hueService.stopPolling();
-  airpurifierService.stopPolling();
   homeconnectService.stopPolling();
   roombaService.stopPolling();
+  airpurifierService.stopAllPolling();
 
   hueService.startPolling();
-  airpurifierService.startPolling();
   homeconnectService.startPolling();
   roombaService.startPolling();
+  airpurifierService.startAllPolling();
 
   broadcast({
     type: 'config_changed',
@@ -79,7 +78,7 @@ function handleConfigChange(config) {
 function handleMessage(ws, data) {
   switch (data.type) {
     case 'ping':
-      ws.send(JSON.stringify({ type: 'pong' }));
+      ws.send(JSON.stringify({ type: 'pong', timestamp: data.timestamp }));
       break;
     case 'subscribe':
       ws.send(JSON.stringify({
@@ -100,4 +99,21 @@ function broadcast(message) {
   }
 }
 
-module.exports = { init, broadcast };
+function close() {
+  hueService.stopPolling();
+  homeconnectService.stopPolling();
+  roombaService.stopPolling();
+  airpurifierService.stopAllPolling();
+  storage.stopWatching();
+
+  for (const client of clients) {
+    client.terminate();
+  }
+  clients.clear();
+
+  if (wss) {
+    wss.close();
+  }
+}
+
+module.exports = { init, broadcast, close };

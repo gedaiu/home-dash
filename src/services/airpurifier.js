@@ -1,303 +1,119 @@
-const { PhilipsCoapClient, PlainCoapClient, HttpClient } = require('../lib/philips-coap');
-const discovery = require('../discovery/airpurifier');
+const { CoapClient: coap } = require('node-coap-client');
+const crypto = require('crypto');
 const storage = require('./storage');
+const philipsCoap = require('../lib/philips-coap');
 
-const REQUEST_TIMEOUT = 15000;
+const COAP_PORT = 5683;
+const DISPLAY_HISTORY_LENGTH = 100;
+
+const devices = new Map();
+const pm25History = new Map();
+const pm25DailyStats = new Map();
 
 let broadcastFn = null;
-let pollTimer = null;
-const POLL_INTERVAL_MS = 10000;
+let saveTimeout = null;
 
-const purifierClients = new Map();
+function scheduleSave() {
+  if (saveTimeout) {
+    return;
+  }
 
-function getAirQualityLevel(pm25) {
-  if (pm25 <= 12) {
-    return { level: 'good', color: '#00ff88' };
-  }
-  if (pm25 <= 35) {
-    return { level: 'moderate', color: '#ffcc00' };
-  }
-  if (pm25 <= 55) {
-    return { level: 'unhealthy-sensitive', color: '#ff9900' };
-  }
-  if (pm25 <= 150) {
-    return { level: 'unhealthy', color: '#ff3333' };
-  }
-  if (pm25 <= 250) {
-    return { level: 'very-unhealthy', color: '#cc00cc' };
-  }
-  return { level: 'hazardous', color: '#990000' };
+  saveTimeout = setTimeout(() => {
+    const historyObj = {};
+    const statsObj = {};
+    for (const [key, value] of pm25History) {
+      historyObj[key] = value;
+    }
+    for (const [key, value] of pm25DailyStats) {
+      statsObj[key] = value;
+    }
+    storage.saveSensorData(historyObj, statsObj);
+    saveTimeout = null;
+  }, 5000);
 }
 
-async function discover() {
-  return discovery.discoverDevices();
+function getToday() {
+  return new Date().toISOString().split('T')[0];
 }
 
-async function discoverDeep(subnet) {
-  return discovery.discoverWithProbe(subnet);
-}
-
-function getClient(config) {
-  const key = config.ip + '-' + config.protocol;
-
-  if (purifierClients.has(key)) {
-    return purifierClients.get(key);
+function updatePm25History(index, pm25Value) {
+  if (pm25Value === null || pm25Value === undefined) {
+    return;
   }
 
-  let client;
-  switch (config.protocol) {
-    case 'coap':
-      client = new PhilipsCoapClient(config.ip, REQUEST_TIMEOUT);
-      break;
-    case 'plain-coap':
-      client = new PlainCoapClient(config.ip, REQUEST_TIMEOUT);
-      break;
-    default:
-      client = new HttpClient(config.ip, REQUEST_TIMEOUT);
+  const sensorId = `airpurifier_${index}_pm25`;
+
+  if (!pm25History.has(sensorId)) {
+    pm25History.set(sensorId, []);
   }
 
-  purifierClients.set(key, client);
-  return client;
-}
+  const history = pm25History.get(sensorId);
+  const lastEntry = history[history.length - 1];
+  const now = Date.now();
 
-async function testCoapSyncOnly(ip, verbose = false) {
-  // Test if the device responds to CoAP sync but not status
-  // This indicates a cloud-only device
-  try {
-    const client = new PhilipsCoapClient(ip, REQUEST_TIMEOUT, verbose);
-    const synced = await client.sync();
-
-    if (synced) {
-      if (verbose) {
-        console.log('[airpurifier] CoAP sync succeeded, counter:', client.counter);
-      }
-      return { syncWorks: true, counter: client.counter };
-    }
-    return { syncWorks: false };
-  } catch {
-    return { syncWorks: false };
-  }
-}
-
-async function testConnectionWithProtocol(ip, protocol, verbose = false) {
-  try {
-    let client;
-    if (verbose) {
-      console.log('[airpurifier] Trying protocol:', protocol);
-    }
-    switch (protocol) {
-      case 'coap':
-        client = new PhilipsCoapClient(ip, REQUEST_TIMEOUT, verbose);
-        break;
-      case 'plain-coap':
-        client = new PlainCoapClient(ip, REQUEST_TIMEOUT, verbose);
-        break;
-      default:
-        client = new HttpClient(ip, REQUEST_TIMEOUT, verbose);
-    }
-
-    const status = await client.getStatus();
-    if (verbose) {
-      console.log('[airpurifier] Protocol', protocol, 'succeeded');
-    }
-    return { success: true, status, protocol };
-  } catch (err) {
-    if (verbose) {
-      console.log('[airpurifier] Protocol', protocol, 'failed:', err.message);
-    }
-    return { success: false, error: err.message };
-  }
-}
-
-async function testConnection(ip, verbose = false) {
-  const protocols = ['coap', 'plain-coap', 'http'];
-
-  for (const protocol of protocols) {
-    if (verbose) {
-      console.log('[airpurifier] Trying protocol:', protocol);
-    }
-    const result = await testConnectionWithProtocol(ip, protocol, verbose);
-    if (result.success) {
-      return result;
-    }
+  if (!lastEntry || lastEntry.v !== pm25Value) {
+    history.push({ t: now, v: pm25Value });
+    scheduleSave();
   }
 
-  return { success: false };
-}
+  const today = getToday();
+  const statsKey = `${sensorId}_${today}`;
+  let stats = pm25DailyStats.get(statsKey);
 
-async function testConnectionVerbose(ip) {
-  console.log('[airpurifier] Testing connection to', ip, 'with verbose logging');
-  return testConnection(ip, true);
-}
-
-async function probeDevice(ip, verbose = true) {
-  console.log('[airpurifier] Probing device at', ip);
-  const result = await testConnection(ip, verbose);
-
-  if (!result.success) {
-    // Check if device responds to CoAP sync but not status (cloud-only device)
-    if (verbose) {
-      console.log('[airpurifier] All protocols failed, checking for cloud-only device...');
+  if (!stats) {
+    stats = { min: pm25Value, max: pm25Value, date: today };
+    pm25DailyStats.set(statsKey, stats);
+  } else {
+    if (pm25Value < stats.min) {
+      stats.min = pm25Value;
     }
-
-    const syncResult = await testCoapSyncOnly(ip, verbose);
-    if (syncResult.syncWorks) {
-      console.log('[airpurifier] Device responds to CoAP sync but not status requests');
-      console.log('[airpurifier] This device likely requires cloud control (MQTT)');
-      return {
-        ip,
-        protocol: 'cloud-only',
-        name: 'Air Purifier (' + ip + ')',
-        modelId: null,
-        pm25: null,
-        firmware: null,
-        power: null,
-        cloudOnly: true,
-        rawStatus: null
-      };
+    if (pm25Value > stats.max) {
+      stats.max = pm25Value;
     }
-
-    console.log('[airpurifier] All protocols failed for', ip);
-    return null;
   }
-
-  const status = result.status || {};
-  const name = status.name || status.DeviceName || status.type || null;
-  const modelId = status.modelid || status.type || status.ProductId || null;
-  const pm25 = status.pm25 ?? status.pm2_5 ?? null;
-  const firmware = status.swversion || status.WifiVersion || null;
 
   return {
-    ip,
-    protocol: result.protocol,
-    name: name || 'Air Purifier (' + ip + ')',
-    modelId,
-    pm25,
-    firmware,
-    power: status.pwr === '1' || status.pwr === 1 || status.power === 'on',
-    rawStatus: status
+    history: history.slice(-DISPLAY_HISTORY_LENGTH),
+    dailyStats: stats
   };
 }
 
-async function pair(ip) {
-  const deviceInfo = await probeDevice(ip);
+function getPm25Sensor(index) {
+  const config = getConfig(index);
+  const state = getDeviceState(index);
+  const sensorId = `airpurifier_${index}_pm25`;
+  const today = getToday();
+  const statsKey = `${sensorId}_${today}`;
 
-  if (!deviceInfo) {
-    return {
-      success: false,
-      error: 'Could not connect using any protocol (CoAP encrypted, CoAP plain, HTTP).'
-    };
-  }
-
-  const safeIp = ip.replace(/\./g, '-');
-  const config = {
-    id: 'purifier-' + safeIp,
-    ip,
-    protocol: deviceInfo.protocol,
-    name: deviceInfo.name,
-    model: deviceInfo.modelId
-  };
-
-  storage.addAirPurifier(config);
+  const history = pm25History.get(sensorId) || [];
+  const stats = pm25DailyStats.get(statsKey);
 
   return {
-    success: true,
-    config,
-    status: deviceInfo.rawStatus,
-    deviceInfo
+    id: sensorId,
+    name: (config?.name || `Purifier ${index + 1}`) + ' PM2.5',
+    category: 'pm25',
+    state: {
+      pm25: state.status?.pm25 ?? null,
+      lastupdated: state.lastUpdate
+    },
+    history: history.slice(-DISPLAY_HISTORY_LENGTH),
+    dailyStats: stats || null
   };
 }
 
-async function getStatus(purifierId) {
-  const config = storage.getAirPurifier(purifierId);
-  if (!config) {
-    return null;
-  }
-
-  try {
-    const client = getClient(config);
-    const status = await client.getStatus();
-
-    const pm25 = status.pm25 ?? status.pm2_5 ?? null;
-    const airQuality = pm25 !== null ? getAirQualityLevel(pm25) : null;
-
-    return {
-      id: config.id,
-      name: config.name,
-      ip: config.ip,
-      protocol: config.protocol,
-      model: config.model,
-      power: status.pwr === '1' || status.pwr === 1 || status.power === 'on',
-      mode: status.mode || status.om || 'auto',
-      fanSpeed: status.om || status.fan_speed || null,
-      pm25,
-      airQuality,
-      humidity: status.rh ?? status.humidity ?? null,
-      temperature: status.temp ?? status.temperature ?? null,
-      allergenIndex: status.iaql ?? null,
-      filterLife: {
-        preFilter: status.fltsts0 ?? null,
-        hepaFilter: status.fltsts1 ?? null,
-        carbonFilter: status.fltsts2 ?? null
-      },
-      childLock: status.cl === true || status.cl === '1',
-      light: status.aqil ?? status.uil ?? null,
-      rawStatus: status
-    };
-  } catch (err) {
-    return {
-      id: config.id,
-      name: config.name,
-      ip: config.ip,
-      protocol: config.protocol,
-      model: config.model,
-      error: err.message,
-      offline: true
-    };
-  }
+function getAllPm25Sensors() {
+  const configs = getAllConfigs();
+  return configs.map((_, index) => getPm25Sensor(index)).filter(s => s.state.pm25 !== null);
 }
 
-async function getAllStatuses() {
-  const configs = storage.getAirPurifiers();
-  const statuses = await Promise.all(
-    configs.map(config => getStatus(config.id))
-  );
-  return statuses.filter(Boolean);
+function log(index, message) {
+  const prefix = index !== null ? `[airpurifier:${index}]` : '[airpurifier]';
+  console.log(`${prefix} ${message}`);
 }
 
-async function setValues(purifierId, values) {
-  const config = storage.getAirPurifier(purifierId);
-  if (!config) {
-    throw new Error('Purifier not configured');
-  }
-
-  const client = getClient(config);
-  await client.setValues(values);
-}
-
-async function setPower(purifierId, on) {
-  await setValues(purifierId, { pwr: on ? '1' : '0' });
-}
-
-async function setMode(purifierId, mode) {
-  await setValues(purifierId, { mode });
-}
-
-async function setFanSpeed(purifierId, speed) {
-  await setValues(purifierId, { om: speed });
-}
-
-function remove(purifierId) {
-  storage.removeAirPurifier(purifierId);
-  for (const [key] of purifierClients) {
-    if (key.startsWith(purifierId)) {
-      purifierClients.delete(key);
-    }
-  }
-}
-
-function updateName(purifierId, name) {
-  storage.updateAirPurifier(purifierId, { name });
+function logError(index, message, err) {
+  const prefix = index !== null ? `[airpurifier:${index}]` : '[airpurifier]';
+  console.error(`${prefix} ${message}`, err ? err.message : '');
 }
 
 function setBroadcast(fn) {
@@ -310,50 +126,382 @@ function broadcast(type, data) {
   }
 }
 
-async function pollPurifiers() {
-  try {
-    const statuses = await getAllStatuses();
-    if (statuses.length > 0) {
-      broadcast('airpurifiers', statuses);
-    }
-  } catch {
-    // Ignore polling errors
+function getDeviceState(index) {
+  if (!devices.has(index)) {
+    devices.set(index, {
+      connected: false,
+      counter: null,
+      status: null,
+      lastUpdate: null,
+      observing: false
+    });
   }
+  return devices.get(index);
 }
 
-function startPolling() {
-  if (pollTimer) {
+function getConfig(index) {
+  return storage.getAirPurifier(index);
+}
+
+function getAllConfigs() {
+  return storage.getAirPurifiers();
+}
+
+function isConfigured(index) {
+  const config = getConfig(index);
+  return !!(config?.ip);
+}
+
+function getBaseUrl(index) {
+  const config = getConfig(index);
+  if (!config?.ip) {
+    return null;
+  }
+  return `coap://${config.ip}:${COAP_PORT}`;
+}
+
+async function getDeviceInfo(index) {
+  const baseUrl = getBaseUrl(index);
+  if (!baseUrl) {
+    throw new Error('Air purifier not configured');
+  }
+
+  const response = await coap.request(`${baseUrl}/sys/dev/info`, 'get', null, {
+    keepAlive: true,
+    confirmable: true,
+    retransmit: true
+  });
+
+  if (response.payload) {
+    return JSON.parse(response.payload.toString());
+  }
+
+  return null;
+}
+
+async function sync(index) {
+  const baseUrl = getBaseUrl(index);
+  if (!baseUrl) {
+    throw new Error('Air purifier not configured');
+  }
+
+  const state = getDeviceState(index);
+  const config = getConfig(index);
+
+  log(index, `Syncing with device at ${config.ip}...`);
+
+  coap.stopObserving(`${baseUrl}/sys/dev/status`);
+  coap.reset(baseUrl);
+
+  const token = crypto.randomBytes(32).toString('hex').toUpperCase();
+  const response = await coap.request(`${baseUrl}/sys/dev/sync`, 'post',
+    Buffer.from(token, 'utf-8'),
+    { keepAlive: true, confirmable: true, retransmit: true }
+  );
+
+  if (response.payload) {
+    state.counter = response.payload.toString('utf-8');
+    state.connected = true;
+    log(index, `Sync successful, counter: ${state.counter}`);
+    return state.counter;
+  }
+
+  throw new Error('Sync failed - no counter received');
+}
+
+async function connect(index) {
+  if (!isConfigured(index)) {
+    throw new Error('Air purifier not configured');
+  }
+
+  await sync(index);
+  return getDeviceState(index).connected;
+}
+
+async function disconnect(index) {
+  const baseUrl = getBaseUrl(index);
+  const state = getDeviceState(index);
+
+  if (baseUrl) {
+    try {
+      coap.stopObserving(`${baseUrl}/sys/dev/status`);
+      coap.reset(baseUrl);
+    } catch {
+      // Ignore errors during cleanup
+    }
+  }
+
+  state.connected = false;
+  state.observing = false;
+  state.counter = null;
+  state.status = null;
+}
+
+async function startObserving(index) {
+  const baseUrl = getBaseUrl(index);
+  const state = getDeviceState(index);
+
+  if (!baseUrl || !state.connected) {
+    throw new Error('Not connected to air purifier');
+  }
+
+  if (state.observing) {
+    log(index, 'Already observing, skipping');
     return;
   }
 
-  pollTimer = setInterval(pollPurifiers, POLL_INTERVAL_MS);
-  pollPurifiers();
+  log(index, 'Starting observation...');
+
+  await coap.observe(`${baseUrl}/sys/dev/status`, 'get',
+    (response) => {
+      if (response.payload && response.payload.length > 0) {
+        try {
+          const hexPayload = response.payload.toString('utf-8');
+          log(index, `Received status update (${hexPayload.length} chars)`);
+          const data = philipsCoap.decrypt(hexPayload);
+          if (data) {
+            state.status = philipsCoap.parseStatus(data);
+            state.lastUpdate = new Date().toISOString();
+            log(index, `Status: pwr=${state.status.pwr}, pm25=${state.status.pm25}, iaql=${state.status.iaql}, mode=${state.status.mode}`);
+            updatePm25History(index, state.status.pm25);
+            broadcast('airpurifier', { index, ...getStatus(index) });
+            broadcast('pm25_sensors', getAllPm25Sensors());
+          }
+        } catch (err) {
+          logError(index, 'Decrypt error:', err);
+        }
+      }
+    },
+    '',
+    { keepAlive: true, confirmable: false, retransmit: true }
+  );
+
+  state.observing = true;
+  log(index, 'Observation started');
 }
 
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
+function stopObserving(index) {
+  const baseUrl = getBaseUrl(index);
+  const state = getDeviceState(index);
+
+  if (baseUrl) {
+    try {
+      coap.stopObserving(`${baseUrl}/sys/dev/status`);
+    } catch {
+      // Ignore
+    }
+  }
+  state.observing = false;
+}
+
+async function sendCommand(index, key, value) {
+  const baseUrl = getBaseUrl(index);
+  const state = getDeviceState(index);
+
+  if (!baseUrl) {
+    throw new Error('Air purifier not configured');
+  }
+
+  if (!state.connected || !state.counter) {
+    await connect(index);
+  }
+
+  const command = philipsCoap.buildCommand(key, value);
+  const encrypted = philipsCoap.encrypt(command, state.counter);
+
+  log(index, `Sending command: ${key}=${value}`);
+  log(index, `Command payload: ${JSON.stringify(command)}`);
+
+  state.counter = philipsCoap.incrementCounter(state.counter);
+
+  const response = await coap.request(`${baseUrl}/sys/dev/control`, 'post',
+    Buffer.from(encrypted, 'utf-8'),
+    { keepAlive: true, confirmable: true, retransmit: true }
+  );
+
+  const success = response.code?.major === 2;
+  log(index, `Response: code=${response.code?.major}.${response.code?.minor}, success=${success}`);
+
+  return success;
+}
+
+async function setPower(index, on) {
+  return sendCommand(index, 'pwr', on ? '1' : '0');
+}
+
+async function setFanSpeed(index, speed) {
+  const validSpeeds = ['1', '2', '3', 's', 't'];
+  const speedStr = String(speed).toLowerCase();
+  if (!validSpeeds.includes(speedStr)) {
+    throw new Error(`Invalid fan speed: ${speed}. Valid: 1, 2, 3, s (sleep), t (turbo)`);
+  }
+  return sendCommand(index, 'om', speedStr);
+}
+
+async function setMode(index, mode) {
+  const validModes = ['M', 'AG', 'AL', 'T', 'S'];
+  const modeUpper = String(mode).toUpperCase();
+  if (!validModes.includes(modeUpper)) {
+    throw new Error(`Invalid mode: ${mode}. Valid: M (manual), AG (auto), AL (allergen), T (turbo), S (sleep)`);
+  }
+  return sendCommand(index, 'mode', modeUpper);
+}
+
+async function setChildLock(index, on) {
+  return sendCommand(index, 'cl', on);
+}
+
+async function setLight(index, brightness) {
+  const bri = Math.max(0, Math.min(100, Math.round(brightness)));
+  return sendCommand(index, 'aqil', bri);
+}
+
+async function setButtonLight(index, on) {
+  return sendCommand(index, 'uil', on ? '1' : '0');
+}
+
+function getStatus(index) {
+  const config = getConfig(index);
+  const state = getDeviceState(index);
+
+  if (!config) {
+    return {
+      index,
+      configured: false
+    };
+  }
+
+  return {
+    index,
+    configured: true,
+    connected: state.connected,
+    observing: state.observing,
+    lastUpdate: state.lastUpdate,
+    device: {
+      ip: config.ip,
+      name: config.name || state.status?.name,
+      model: config.model || state.status?.model
+    },
+    ...state.status
+  };
+}
+
+function getAllStatuses() {
+  const configs = getAllConfigs();
+  return configs.map((_, index) => getStatus(index));
+}
+
+async function configure(ip, customName) {
+  const testUrl = `coap://${ip}:${COAP_PORT}`;
+
+  try {
+    const response = await coap.request(`${testUrl}/sys/dev/info`, 'get', null, {
+      keepAlive: true,
+      confirmable: true,
+      retransmit: true
+    });
+
+    if (!response.payload) {
+      throw new Error('No response from device');
+    }
+
+    const info = JSON.parse(response.payload.toString());
+
+    const index = storage.addAirPurifier({
+      ip,
+      name: customName || info.name,
+      model: info.modelid
+    });
+
+    coap.reset(testUrl);
+
+    return {
+      success: true,
+      index,
+      device: {
+        ip,
+        name: info.name,
+        model: info.modelid,
+        type: info.type
+      }
+    };
+  } catch (err) {
+    coap.reset(testUrl);
+    throw new Error(`Failed to connect to air purifier at ${ip}: ${err.message}`);
   }
 }
 
+function remove(index) {
+  disconnect(index);
+  storage.removeAirPurifier(index);
+  devices.delete(index);
+}
+
+async function startPolling(index) {
+  if (!isConfigured(index)) {
+    log(index, 'Not configured, skipping');
+    return;
+  }
+
+  const config = getConfig(index);
+  log(index, `Starting polling for ${config.name || config.ip}...`);
+
+  try {
+    await connect(index);
+    await startObserving(index);
+    log(index, 'Polling started successfully');
+  } catch (err) {
+    logError(index, 'Failed to start polling:', err);
+    broadcast('error', { service: `Air Purifier ${index + 1}`, message: err.message });
+  }
+}
+
+function stopPolling(index) {
+  log(index, 'Stopping polling...');
+  stopObserving(index);
+  disconnect(index);
+  log(index, 'Polling stopped');
+}
+
+async function startAllPolling() {
+  const configs = getAllConfigs();
+  log(null, `Starting polling for ${configs.length} device(s)...`);
+  for (let i = 0; i < configs.length; i++) {
+    await startPolling(i);
+  }
+  log(null, 'All devices polling started');
+}
+
+function stopAllPolling() {
+  const configs = getAllConfigs();
+  log(null, `Stopping polling for ${configs.length} device(s)...`);
+  for (let i = 0; i < configs.length; i++) {
+    stopPolling(i);
+  }
+  log(null, 'All devices polling stopped');
+}
+
 module.exports = {
-  discover,
-  discoverDeep,
-  pair,
-  probeDevice,
-  testConnection,
-  testConnectionVerbose,
+  isConfigured,
+  getConfig,
+  getAllConfigs,
+  configure,
+  remove,
+  connect,
+  disconnect,
+  getDeviceInfo,
   getStatus,
   getAllStatuses,
-  setValues,
-  setPower,
-  setMode,
-  setFanSpeed,
-  remove,
-  updateName,
-  getAirQualityLevel,
-  setBroadcast,
   startPolling,
-  stopPolling
+  stopPolling,
+  startAllPolling,
+  stopAllPolling,
+  setPower,
+  setFanSpeed,
+  setMode,
+  setChildLock,
+  setLight,
+  setButtonLight,
+  setBroadcast,
+  getAllPm25Sensors
 };

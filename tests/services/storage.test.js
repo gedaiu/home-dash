@@ -15,14 +15,6 @@ const {
   setNanoleaf,
   getSync,
   setSync,
-  getAirPurifiers,
-  getAirPurifier,
-  addAirPurifier,
-  removeAirPurifier,
-  updateAirPurifier,
-  getDiscoveredAirPurifierIps,
-  addDiscoveredAirPurifierIp,
-  setDiscoveredAirPurifierIps,
   getRoomba,
   setRoomba
 } = require('../../src/services/storage');
@@ -328,15 +320,13 @@ describe('storage CRUD operations', () => {
       expect(config).toHaveProperty('hue');
       expect(config).toHaveProperty('nanoleaf');
       expect(config).toHaveProperty('sync');
-      expect(config).toHaveProperty('airPurifiers');
     });
 
     it('save and load round-trips config', () => {
       const testConfig = {
         hue: { ip: '1.2.3.4', username: 'test' },
         nanoleaf: { ip: '5.6.7.8', authToken: 'token' },
-        sync: { hueDeviceId: 1 },
-        airPurifiers: []
+        sync: { hueDeviceId: 1 }
       };
       save(testConfig);
       const loaded = load();
@@ -346,7 +336,7 @@ describe('storage CRUD operations', () => {
 
   describe('Hue config', () => {
     it('getHue returns null when not set', () => {
-      save({ hue: null, nanoleaf: null, sync: null, airPurifiers: [] });
+      save({ hue: null, nanoleaf: null, sync: null });
       expect(getHue()).toBeNull();
     });
 
@@ -359,7 +349,7 @@ describe('storage CRUD operations', () => {
 
   describe('Nanoleaf config', () => {
     it('getNanoleaf returns null when not set', () => {
-      save({ hue: null, nanoleaf: null, sync: null, airPurifiers: [] });
+      save({ hue: null, nanoleaf: null, sync: null });
       expect(getNanoleaf()).toBeNull();
     });
 
@@ -372,7 +362,7 @@ describe('storage CRUD operations', () => {
 
   describe('Sync config', () => {
     it('getSync returns null when not set', () => {
-      save({ hue: null, nanoleaf: null, sync: null, airPurifiers: [] });
+      save({ hue: null, nanoleaf: null, sync: null });
       expect(getSync()).toBeNull();
     });
 
@@ -385,7 +375,7 @@ describe('storage CRUD operations', () => {
 
   describe('Roomba config', () => {
     it('getRoomba returns null when not set', () => {
-      save({ hue: null, nanoleaf: null, sync: null, airPurifiers: [] });
+      save({ hue: null, nanoleaf: null, sync: null });
       expect(getRoomba()).toBeNull();
     });
 
@@ -393,89 +383,6 @@ describe('storage CRUD operations', () => {
       const roombaConfig = { ip: '192.168.1.102', blid: 'blid123', password: 'pass' };
       setRoomba(roombaConfig);
       expect(getRoomba()).toEqual(roombaConfig);
-    });
-  });
-
-  describe('Air purifiers', () => {
-    it('getAirPurifiers returns empty array when none configured', () => {
-      save({ hue: null, nanoleaf: null, sync: null, airPurifiers: [] });
-      expect(getAirPurifiers()).toEqual([]);
-    });
-
-    it('addAirPurifier adds new purifier', () => {
-      save({ hue: null, nanoleaf: null, sync: null, airPurifiers: [] });
-      const purifier = { id: 'purifier-1', ip: '192.168.1.200', protocol: 'coap' };
-      addAirPurifier(purifier);
-      expect(getAirPurifiers()).toContainEqual(purifier);
-    });
-
-    it('addAirPurifier updates existing purifier by id', () => {
-      save({ hue: null, nanoleaf: null, sync: null, airPurifiers: [] });
-      addAirPurifier({ id: 'purifier-1', ip: '192.168.1.200', name: 'Old Name' });
-      addAirPurifier({ id: 'purifier-1', ip: '192.168.1.200', name: 'New Name' });
-      const purifiers = getAirPurifiers();
-      expect(purifiers.length).toBe(1);
-      expect(purifiers[0].name).toBe('New Name');
-    });
-
-    it('getAirPurifier returns purifier by id', () => {
-      save({ hue: null, nanoleaf: null, sync: null, airPurifiers: [] });
-      const purifier = { id: 'purifier-2', ip: '192.168.1.201' };
-      addAirPurifier(purifier);
-      expect(getAirPurifier('purifier-2')).toEqual(purifier);
-    });
-
-    it('getAirPurifier returns null for non-existent id', () => {
-      save({ hue: null, nanoleaf: null, sync: null, airPurifiers: [] });
-      expect(getAirPurifier('non-existent')).toBeNull();
-    });
-
-    it('removeAirPurifier removes purifier by id', () => {
-      save({ hue: null, nanoleaf: null, sync: null, airPurifiers: [] });
-      addAirPurifier({ id: 'purifier-3', ip: '192.168.1.202' });
-      addAirPurifier({ id: 'purifier-4', ip: '192.168.1.203' });
-      removeAirPurifier('purifier-3');
-      const purifiers = getAirPurifiers();
-      expect(purifiers.length).toBe(1);
-      expect(purifiers[0].id).toBe('purifier-4');
-    });
-
-    it('updateAirPurifier updates specific fields', () => {
-      save({ hue: null, nanoleaf: null, sync: null, airPurifiers: [] });
-      addAirPurifier({ id: 'purifier-5', ip: '192.168.1.204', name: 'Original' });
-      updateAirPurifier('purifier-5', { name: 'Updated' });
-      const purifier = getAirPurifier('purifier-5');
-      expect(purifier.name).toBe('Updated');
-      expect(purifier.ip).toBe('192.168.1.204');
-    });
-  });
-
-  describe('Discovered air purifier IPs', () => {
-    it('getDiscoveredAirPurifierIps returns empty array when none', () => {
-      save({ hue: null, nanoleaf: null, sync: null, airPurifiers: [] });
-      expect(getDiscoveredAirPurifierIps()).toEqual([]);
-    });
-
-    it('addDiscoveredAirPurifierIp adds IP', () => {
-      save({ hue: null, nanoleaf: null, sync: null, airPurifiers: [] });
-      addDiscoveredAirPurifierIp('192.168.1.210');
-      expect(getDiscoveredAirPurifierIps()).toContain('192.168.1.210');
-    });
-
-    it('addDiscoveredAirPurifierIp does not add duplicate IPs', () => {
-      save({ hue: null, nanoleaf: null, sync: null, airPurifiers: [] });
-      addDiscoveredAirPurifierIp('192.168.1.211');
-      addDiscoveredAirPurifierIp('192.168.1.211');
-      const ips = getDiscoveredAirPurifierIps();
-      expect(ips.filter(ip => ip === '192.168.1.211').length).toBe(1);
-    });
-
-    it('setDiscoveredAirPurifierIps replaces all IPs', () => {
-      save({ hue: null, nanoleaf: null, sync: null, airPurifiers: [] });
-      addDiscoveredAirPurifierIp('192.168.1.220');
-      setDiscoveredAirPurifierIps(['192.168.1.221', '192.168.1.222']);
-      const ips = getDiscoveredAirPurifierIps();
-      expect(ips).toEqual(['192.168.1.221', '192.168.1.222']);
     });
   });
 });

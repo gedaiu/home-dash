@@ -1,5 +1,6 @@
 const { discovery, api } = require('node-hue-api');
 const storage = require('./storage');
+const color = require('../lib/color');
 
 const APP_NAME = 'hue-nanoleaf-sync';
 const DEVICE_NAME = 'web-server';
@@ -7,6 +8,7 @@ const DEVICE_NAME = 'web-server';
 let cachedApi = null;
 let broadcastFn = null;
 let pollTimer = null;
+const previousLightStates = {};
 
 const DISPLAY_HISTORY_LENGTH = 2880;
 const POLL_INTERVAL_MS = 5000;
@@ -102,7 +104,7 @@ function updateSensorHistory(sensorId, category, state) {
     };
   }
 
-  if (category === 'motion') {
+  if (category === 'motion' || category === 'temperature' || category === 'lightlevel') {
     return { history: sensorHistory[sensorId] || [], dailyStats };
   }
 
@@ -431,9 +433,55 @@ function broadcast(type, data) {
   }
 }
 
+function lightStateChanged(prev, curr) {
+  if (!prev) {
+    return true;
+  }
+  return prev.on !== curr.on ||
+         prev.bri !== curr.bri ||
+         prev.hue !== curr.hue ||
+         prev.sat !== curr.sat ||
+         prev.ct !== curr.ct ||
+         prev.colormode !== curr.colormode;
+}
+
+function trackLightChanges(rooms) {
+  for (const room of rooms) {
+    if (room.id === 'sensors') {
+      continue;
+    }
+
+    for (const light of room.lights) {
+      if (light.isSensor) {
+        continue;
+      }
+
+      const key = `${light.id}`;
+      const prev = previousLightStates[key];
+      const curr = light.state;
+
+      if (lightStateChanged(prev, curr)) {
+        let rgb = { r: 0, g: 0, b: 0 };
+        let mode = 'off';
+
+        if (curr.on && curr.reachable) {
+          rgb = color.getLightRgb(curr);
+          mode = curr.colormode || 'unknown';
+        } else if (!curr.reachable) {
+          mode = 'unreachable';
+        }
+
+        storage.logLightChange(light.name, rgb, mode, curr);
+        previousLightStates[key] = { ...curr };
+      }
+    }
+  }
+}
+
 async function pollRooms() {
   try {
     const rooms = await getRooms();
+    trackLightChanges(rooms);
     broadcast('rooms', rooms);
   } catch {
     // Ignore polling errors

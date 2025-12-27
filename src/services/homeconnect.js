@@ -344,6 +344,7 @@ async function getAllStatuses(forceRefresh = false) {
     return await fetchStatusesFromApi();
   } catch (err) {
     console.error('Home Connect polling error:', err.message);
+    broadcast('error', { service: 'Home Connect', message: err.message });
     const cache = storage.getHomeConnectCache();
     return cache.statuses || [];
   }
