@@ -75,7 +75,7 @@ body {
   z-index: 50;
   display: flex;
   justify-content: space-between;
-  
+
   align-items: center;
   padding: 12px 20px;
   border-bottom: 1px solid var(--border);
@@ -125,7 +125,7 @@ body {
 
 .ekg-monitor {
   display: flex;
-  
+
   align-items: center;
   gap: 4px;
 }
@@ -224,7 +224,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 3px;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   flex-direction: column;
 }
 
@@ -673,6 +673,12 @@ body {
   --sensor-color: #b388ff;
 }
 
+.switch-lastpress {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
 .bottom-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -832,16 +838,15 @@ select optgroup {
   overflow-y: auto;
   font-size: 14px;
   display: flex;
-  justify-content: space-between;
   flex-direction: column;
-  gap: 2px;
+  align-items: flex-start;
+  justify-content: flex-start;
 }
 
 .log-line {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 2px 0;
+  gap: 8px;
+  width: 100%;
 }
 
 .log-time {
@@ -873,10 +878,10 @@ select optgroup {
   font-size: 14px;
   color: var(--text-dim);
   display: flex;
-  
+
   gap: 12px;
   align-items: center;
-  
+
 }
 
 .footer .ekg-monitor {
@@ -890,14 +895,10 @@ select optgroup {
 .footer-msg {
   flex: 1;
   color: var(--text);
-}
-
-.footer-msg.success {
-  color: var(--success);
-}
-
-.footer-msg.error {
-  color: var(--error);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .footer.flash {
@@ -963,7 +964,7 @@ select optgroup {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  
+
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   font-size: 14px;
@@ -1351,7 +1352,7 @@ select optgroup {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  
+
   padding: 10px 12px;
   background: var(--panel-bg);
   border-bottom: 1px solid var(--border);

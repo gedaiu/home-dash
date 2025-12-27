@@ -1,0 +1,140 @@
+.sensors-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.sensors-row:empty {
+  display: none;
+}
+
+.sensor-panel {
+  --sensor-color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  display: flex;
+  justify-content: space-between;
+  flex-direction: column;
+}
+
+.sensor-panel .sensor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  letter-spacing: 1px;
+}
+
+.sensor-panel .sensor-header i {
+  width: 16px;
+  height: 16px;
+  color: var(--sensor-color);
+}
+
+.sensor-panel .sensor-content {
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.sensor-main {
+  flex-shrink: 0;
+}
+
+.sensor-value {
+  font-size: 28px;
+  color: var(--sensor-color);
+  text-shadow: 0 0 10px var(--sensor-color);
+}
+
+.sensor-unit {
+  font-size: 14px;
+  color: var(--text-dim);
+}
+
+.sensor-minmax {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.motion-detections {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-dim);
+  max-height: 40px;
+  overflow: hidden;
+}
+
+.motion-detections span {
+  background: var(--border);
+  padding: 2px 5px;
+  border-radius: 3px;
+}
+
+.sparkline {
+  flex: 1;
+  height: 40px;
+  min-width: 80px;
+}
+
+.sparkline svg {
+  width: 100%;
+  height: 100%;
+}
+
+.sparkline-empty {
+  height: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  justify-content: center;
+  color: var(--border);
+  font-size: 12px;
+  letter-spacing: 2px;
+}
+
+/* Temperature Panel - Warm Red/Orange */
+.sensor-temperature {
+  --sensor-color: #ff6b35;
+}
+
+/* Motion Panel - Electric Blue */
+.sensor-motion {
+  --sensor-color: #00d4ff;
+}
+
+.sensor-motion.active .sensor-value {
+  color: #00ff88;
+  text-shadow: 0 0 12px #00ff88;
+  animation: pulse-glow 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Light Level Panel - Yellow/Gold */
+.sensor-lightlevel {
+  --sensor-color: #ffd700;
+}
+
+/* Switch Panel - Purple */
+.sensor-switch {
+  --sensor-color: #b388ff;
+}
+
+/* PM2.5 Panel - use accent color */
+.sensor-pm25 {
+  --sensor-color: var(--accent);
+}

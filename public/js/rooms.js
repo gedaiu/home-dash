@@ -10,6 +10,53 @@ let pm25Sensors = [];
 let selectedLightId = null;
 let configLocked = false;
 
+function decodeButtonEvent(buttonevent) {
+  if (buttonevent === undefined || buttonevent === null) {
+    return null;
+  }
+
+  const code = parseInt(buttonevent, 10);
+
+  if (code >= 34 && code <= 18) {
+    const tapButtons = { 34: '1', 16: '2', 17: '3', 18: '4' };
+    return { button: tapButtons[code] || '?', action: 'TAP' };
+  }
+
+  const button = Math.floor(code / 1000);
+  const action = code % 10;
+
+  const buttonNames = {
+    1: 'ON',
+    2: 'UP',
+    3: 'DOWN',
+    4: 'OFF'
+  };
+
+  const actionNames = {
+    0: 'PRESS',
+    1: 'HOLD',
+    2: 'TAP',
+    3: 'RELEASE'
+  };
+
+  const buttonName = buttonNames[button] || `BTN${button}`;
+  const actionName = actionNames[action] || '';
+
+  return { button: buttonName, action: actionName };
+}
+
+function formatButtonEvent(buttonevent, lastupdated) {
+  const decoded = decodeButtonEvent(buttonevent);
+  if (!decoded) {
+    return { value: 'READY', timeAgo: '' };
+  }
+
+  const value = `${decoded.button}`;
+  const timeAgo = lastupdated ? formatTimeAgo(lastupdated) : '';
+
+  return { value, timeAgo };
+}
+
 export function getAllRooms() {
   return allRooms;
 }
@@ -74,7 +121,8 @@ function renderSensorPanel(sensor) {
     value = sensor.state.lightlevel;
     unit = ' lux';
   } else if (sensor.category === 'switch') {
-    value = 'READY';
+    const btnEvent = formatButtonEvent(sensor.state.buttonevent, sensor.state.lastupdated);
+    value = btnEvent.value;
   } else if (sensor.category === 'pm25' && sensor.state.pm25 !== undefined) {
     value = sensor.state.pm25;
     unit = ' µg/m³';
@@ -103,6 +151,13 @@ function renderSensorPanel(sensor) {
       bottomContent = `<div class="motion-detections"><span>${formatTimeAgo(sensor.state.lastupdated)}</span></div>`;
     } else {
       bottomContent = `<div class="motion-detections"><span>No recent activity</span></div>`;
+    }
+  } else if (sensor.category === 'switch') {
+    const btnEvent = formatButtonEvent(sensor.state.buttonevent, sensor.state.lastupdated);
+    if (btnEvent.timeAgo) {
+      bottomContent = `<div class="switch-lastpress"><span>${btnEvent.timeAgo}</span></div>`;
+    } else {
+      bottomContent = `<div class="switch-lastpress"><span>No presses recorded</span></div>`;
     }
   }
 

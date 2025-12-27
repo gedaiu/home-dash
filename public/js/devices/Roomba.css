@@ -1,0 +1,21 @@
+.roomba-section {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.roomba-section .section-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.roomba-details {
+  display: none;
+}
+
+.roomba-details.expanded {
+  display: block;
+}

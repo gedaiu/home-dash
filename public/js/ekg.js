@@ -71,7 +71,7 @@ function updateEkgGradient() {
   `;
 }
 
-function initEkg() {
+export function initEkg() {
   const path = $('#ekg-path');
   const trace = $('#ekg-trace');
   const waveform = generateEkgWaveform(ekgAmplitude);

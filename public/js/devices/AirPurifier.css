@@ -1,0 +1,291 @@
+.purifier-list {
+  display: flex;
+  justify-content: space-between;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.purifier-item {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 10px;
+}
+
+.purifier-item.on {
+  border-color: #00ff88;
+}
+
+.purifier-item.offline {
+  opacity: 0.6;
+}
+
+.purifier-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.purifier-header i {
+  width: 16px;
+  height: 16px;
+}
+
+.purifier-name {
+  flex: 1;
+  font-size: 14px;
+}
+
+.purifier-stats {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.purifier-stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.purifier-stat i {
+  width: 14px;
+  height: 14px;
+  color: var(--text-dim);
+}
+
+.purifier-stat.main {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.purifier-stat.main .stat-value {
+  font-size: 28px;
+  line-height: 1;
+  text-shadow: 0 0 10px currentColor;
+}
+
+.purifier-stat .stat-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.purifier-stat .stat-quality {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  color: #000;
+  font-weight: bold;
+}
+
+/* Air Purifier Panel */
+.purifier-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.purifier-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.purifier-card.on {
+  border-color: var(--success);
+  box-shadow: 0 0 8px rgba(0, 255, 136, 0.2);
+}
+
+.purifier-card.offline {
+  opacity: 0.7;
+}
+
+.purifier-card .purifier-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.purifier-card .purifier-name {
+  font-size: 14px;
+  letter-spacing: 1px;
+  color: var(--text-bright);
+}
+
+.purifier-status {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.purifier-body {
+  padding: 12px;
+}
+
+.purifier-ip {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+
+.purifier-readings {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.reading {
+  flex: 1;
+  text-align: center;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.reading-label {
+  display: block;
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+
+.reading-value {
+  display: block;
+  font-size: 18px;
+  font-weight: bold;
+  color: var(--text-bright);
+}
+
+.reading-unit {
+  font-size: 10px;
+  font-weight: normal;
+  color: var(--text-dim);
+  margin-left: 2px;
+}
+
+.reading.pm25 .reading-value {
+  color: var(--accent);
+}
+
+.reading.iaql.good .reading-value {
+  color: var(--success);
+}
+
+.reading.iaql.moderate .reading-value {
+  color: var(--warning);
+}
+
+.reading.iaql.poor .reading-value {
+  color: var(--error);
+}
+
+.reading.iaql.very-poor .reading-value {
+  color: #ff0000;
+}
+
+.purifier-controls {
+  margin-bottom: 16px;
+}
+
+.control-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.control-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  min-width: 50px;
+}
+
+.control-select {
+  flex: 1;
+  font-family: 'VT323', monospace;
+  font-size: 14px;
+  padding: 4px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.control-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.filter-status {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.filter-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.filter-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  min-width: 70px;
+}
+
+.filter-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.filter-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.filter-fill.good {
+  background: var(--success);
+}
+
+.filter-fill.warning {
+  background: var(--warning);
+}
+
+.filter-fill.critical {
+  background: var(--error);
+}
+
+.filter-percent {
+  font-size: 10px;
+  color: var(--text-dim);
+  min-width: 30px;
+  text-align: right;
+}
+
+.filter-value {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}

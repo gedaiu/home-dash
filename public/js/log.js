@@ -17,7 +17,7 @@ export function log(message, type = '') {
   footer.innerHTML = `
     <div class="footer-content">
       <span class="footer-time">${time}</span>
-      <span class="footer-msg ${type}">${message}</span>
+      <span class="footer-msg">${message}</span>
       <span class="blink">_</span>
     </div>
   `;
@@ -32,4 +32,11 @@ export function log(message, type = '') {
 export function clearLog() {
   $('#log-content').innerHTML = '';
   log('Log cleared');
+}
+
+export function initLog() {
+  const clearBtn = $('#clear-log');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', clearLog);
+  }
 }

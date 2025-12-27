@@ -1,16 +1,15 @@
 import { loadPanelNames, attachEditableTitles } from './panels.js';
-import { initEkg, stopEkg } from './ekg.js';
+import { initEkg } from './ekg.js';
 import { log, initLog } from './log.js';
 import { hideModal } from './modal.js';
 import { initWebSocket } from './websocket.js';
 import { loadSyncConfig, initSyncControls } from './sync.js';
-import { renderRooms, renderSensors, populateLightSelect } from './rooms.js';
+import { loadRooms, populateLightSelect } from './rooms.js';
 import { loadHueBridge, discoverHue, pairHue, confirmPairHue } from './devices/hue.js';
 import { loadNanoleaf, discoverNanoleaf, pairNanoleaf, confirmPairNanoleaf } from './devices/nanoleaf.js';
-import { loadRoomba, startRoomba, stopRoomba, pauseRoomba, resumeRoomba, dockRoomba, toggleRoombaDetails } from './devices/roomba.js';
+import { loadRoomba, startRoomba, pauseRoomba, resumeRoomba, dockRoomba, toggleRoombaDetails } from './devices/roomba.js';
 import { loadAirPurifiers, togglePurifierPower, setPurifierMode, setPurifierFan, connectPurifier, addPurifier, confirmAddPurifier, removePurifier, confirmRemovePurifier } from './devices/airpurifier.js';
 import { loadHomeConnect, discoverHomeConnect, configureHomeConnect, startHomeConnectAuth, disconnectHomeConnect } from './devices/homeconnect.js';
-import { API } from './api.js';
 
 window.hideModal = hideModal;
 window.discoverHue = discoverHue;
@@ -20,7 +19,6 @@ window.discoverNanoleaf = discoverNanoleaf;
 window.pairNanoleaf = pairNanoleaf;
 window.confirmPairNanoleaf = confirmPairNanoleaf;
 window.startRoomba = startRoomba;
-window.stopRoomba = stopRoomba;
 window.pauseRoomba = pauseRoomba;
 window.resumeRoomba = resumeRoomba;
 window.dockRoomba = dockRoomba;
@@ -46,35 +44,13 @@ function updateClock() {
   document.getElementById('clock').textContent = `${hours}:${mins}:${secs}`;
 }
 
-async function loadRooms() {
-  try {
-    const rooms = await API.hue.rooms();
-    renderRooms(rooms);
-    populateLightSelect(rooms);
-    lucide.createIcons();
-    attachEditableTitles();
-  } catch (err) {
-    document.getElementById('rooms-content').innerHTML = `<div class="error">Failed to load rooms: ${err.message}</div>`;
-  }
-}
-
-async function loadSensors() {
-  try {
-    const rooms = await API.hue.rooms();
-    renderSensors(rooms);
-    lucide.createIcons();
-    attachEditableTitles();
-  } catch (err) {
-    document.getElementById('sensors-content').innerHTML = `<div class="error">Failed to load sensors: ${err.message}</div>`;
-  }
-}
-
 async function init() {
   lucide.createIcons();
   updateClock();
   setInterval(updateClock, 1000);
 
   initLog();
+  initEkg();
   initSyncControls();
 
   await loadPanelNames();
@@ -86,7 +62,6 @@ async function init() {
     loadAirPurifiers(),
     loadHomeConnect(),
     loadRooms(),
-    loadSensors(),
     loadSyncConfig()
   ]);
 

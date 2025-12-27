@@ -1,0 +1,105 @@
+.sync-content {
+  display: flex;
+  justify-content: space-between;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sync-status {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.sync-info {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sync-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sync-row .label {
+  color: var(--text-dim);
+  min-width: 100px;
+}
+
+.sync-row .value {
+  color: var(--text-dim);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.color-preview {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border);
+  display: inline-block;
+}
+
+.brightness-config {
+  padding-top: 16px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  justify-content: space-between;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.config-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.config-row .label {
+  color: var(--text-dim);
+}
+
+.slider-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.slider-row label {
+  color: var(--text-dim);
+  min-width: 40px;
+}
+
+.slider-row input[type="range"] {
+  flex: 1;
+  -webkit-appearance: none;
+  height: 4px;
+  background: var(--border);
+  outline: none;
+}
+
+.slider-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.slider-row span {
+  min-width: 40px;
+  text-align: right;
+}
+
+@media (max-width: 768px) {
+  .sync-status {
+    flex-direction: column;
+  }
+}
