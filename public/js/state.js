@@ -14,6 +14,14 @@ export const logs = signal([]);
 export const panelNames = signal({});
 export const wsConnected = signal(false);
 export const wsLatency = signal(null);
+export const currentPage = signal('home');
+
+// OpenWrt states
+export const openwrtState = signal({
+  routers: [],
+  devices: [],
+  connections: []
+});
 
 // Log management
 export function addLog(message, type = '') {

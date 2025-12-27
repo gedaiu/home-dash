@@ -1,7 +1,7 @@
 import { html } from 'https://esm.sh/htm@3.1.1/preact';
 import { useState, useEffect, useRef } from 'https://esm.sh/preact@10.19.3/hooks';
 import { effect } from 'https://esm.sh/@preact/signals@1.2.1';
-import { logs, wsConnected, wsLatency } from '../state.js';
+import { logs, wsConnected, wsLatency, currentPage } from '../state.js';
 
 function Clock() {
   const [time, setTime] = useState('00:00:00');
@@ -193,6 +193,40 @@ function EkgMonitor() {
   `;
 }
 
+function NavTabs() {
+  const [page, setPage] = useState(currentPage.value);
+
+  useEffect(() => {
+    const dispose = effect(() => {
+      setPage(currentPage.value);
+    });
+    return dispose;
+  }, []);
+
+  const handleTabClick = (newPage) => {
+    currentPage.value = newPage;
+  };
+
+  return html`
+    <nav class="nav-tabs">
+      <button
+        class="nav-tab ${page === 'home' ? 'active' : ''}"
+        onClick=${() => handleTabClick('home')}
+      >
+        <i data-lucide="home"></i>
+        <span>Home</span>
+      </button>
+      <button
+        class="nav-tab ${page === 'network' ? 'active' : ''}"
+        onClick=${() => handleTabClick('network')}
+      >
+        <i data-lucide="network"></i>
+        <span>Network</span>
+      </button>
+    </nav>
+  `;
+}
+
 export function Layout({ children }) {
   return html`
     <div class="scanlines"></div>
@@ -200,7 +234,7 @@ export function Layout({ children }) {
       <header class="header">
         <div class="header-left">
           <span class="logo">[ HUE-RASSIC PARK ]</span>
-          <span class="version">v2.0.0</span>
+          <${NavTabs} />
         </div>
         <div class="header-right">
           <${Clock} />

@@ -25,13 +25,16 @@ function getBatteryIcon(level) {
 
 export function Roomba() {
   const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
 
   useEffect(() => {
     API.roomba.status().then(data => {
       roombaState.value = data;
+      setLoading(false);
     }).catch(err => {
       console.error('Failed to load Roomba:', err);
+      setLoading(false);
     });
 
     const dispose = effect(() => {
@@ -75,6 +78,14 @@ export function Roomba() {
       addLog(`Failed to dock Roomba: ${err.message}`, 'error');
     }
   };
+
+  if (loading) {
+    return html`
+      <${Panel} panelKey="roomba" defaultName="ROOMBA" icon="bot">
+        <div class="loading">Connecting...</div>
+      <//>
+    `;
+  }
 
   if (!status || !status.configured) {
     return html`
