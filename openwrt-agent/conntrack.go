@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"log"
 	"os/exec"
 	"regexp"
@@ -167,13 +168,19 @@ func extractValue(line, key string) string {
 
 // GetActiveConnections returns current active connections (one-time query)
 func (c *ConntrackCollector) GetActiveConnections() ([]ConntrackEvent, error) {
+	// Try ubus first (OpenWrt LuCI) - more reliable byte counts
+	events, err := c.getConnectionsViaUbus()
+	if err == nil && len(events) > 0 {
+		return events, nil
+	}
+
+	// Fallback to conntrack -L
 	cmd := exec.Command("conntrack", "-L", "-o", "extended")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}
 
-	var events []ConntrackEvent
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 
 	for scanner.Scan() {
@@ -234,4 +241,59 @@ func parseConntrackListLine(line string) (ConntrackEvent, bool) {
 	}
 
 	return event, true
+}
+
+// getConnectionsViaUbus uses ubus call to get connections with proper byte counts
+func (c *ConntrackCollector) getConnectionsViaUbus() ([]ConntrackEvent, error) {
+	cmd := exec.Command("ubus", "call", "luci", "getConntrackList")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse JSON response
+	var result struct {
+		Result []struct {
+			Bytes   int64  `json:"bytes"`
+			Packets int64  `json:"packets"`
+			Layer3  string `json:"layer3"`
+			Layer4  string `json:"layer4"`
+			Src     string `json:"src"`
+			Dst     string `json:"dst"`
+			Sport   int    `json:"sport"`
+			Dport   int    `json:"dport"`
+			Timeout int    `json:"timeout"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(output, &result); err != nil {
+		return nil, err
+	}
+
+	var events []ConntrackEvent
+	for _, conn := range result.Result {
+		// Skip IPv6 for now
+		if conn.Layer3 != "ipv4" {
+			continue
+		}
+
+		event := ConntrackEvent{
+			Action:   "ACTIVE",
+			Protocol: conn.Layer4,
+			SrcIP:    conn.Src,
+			DstIP:    conn.Dst,
+			SrcPort:  conn.Sport,
+			DstPort:  conn.Dport,
+			Bytes:    conn.Bytes,
+			Packets:  conn.Packets,
+			State:    "ESTABLISHED",
+		}
+		events = append(events, event)
+
+		if len(events) >= c.maxConnections {
+			break
+		}
+	}
+
+	return events, nil
 }

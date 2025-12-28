@@ -121,18 +121,13 @@ function SensorPanel({ sensor }) {
   if (sensor.category === 'motion') {
     const detections = getLastMotionDetections(sensor.history);
     if (detections.length > 0) {
-      const row1 = detections.slice(0, 5);
-      const row2 = detections.slice(5, 10);
       bottomContent = html`
-        <div class="motion-detections-container">
-          <div class="motion-detections">${row1.map(d => html`<span key=${d}>${d}</span>`)}</div>
-          ${row2.length > 0 && html`<div class="motion-detections">${row2.map(d => html`<span key=${d}>${d}</span>`)}</div>`}
-        </div>
+        <div class="motion-detections">${detections.map(d => html`<span key=${d}>${d}</span>`)}</div>
       `;
     } else if (sensor.state?.lastupdated) {
-      bottomContent = html`<div class="motion-detections-container"><div class="motion-detections"><span>${formatTimeAgo(sensor.state.lastupdated)}</span></div></div>`;
+      bottomContent = html`<div class="motion-detections"><span>${formatTimeAgo(sensor.state.lastupdated)}</span></div>`;
     } else {
-      bottomContent = html`<div class="motion-detections-container"><div class="motion-detections"><span>No recent activity</span></div></div>`;
+      bottomContent = html`<div class="motion-detections"><span>No recent activity</span></div>`;
     }
   } else if (sensor.category === 'switch') {
     const timeAgo = sensor.state?.lastupdated ? formatTimeAgo(sensor.state.lastupdated) : '';

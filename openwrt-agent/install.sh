@@ -90,40 +90,71 @@ case "$ARCH" in
         ;;
 esac
 
-# Check if binary exists
+# Force rebuild the binary
 BINARY_PATH="${SCRIPT_DIR}/build/${BINARY}"
-if [ ! -f "$BINARY_PATH" ]; then
-    echo -e "${YELLOW}Binary not found. Attempting to build agent...${NC}"
+echo -e "${YELLOW}Building agent binary (force rebuild)...${NC}"
 
-    # Check if Go is installed
-    if command -v go &> /dev/null; then
-        cd "$SCRIPT_DIR"
+# Find Go binary
+GO_BIN=""
+if command -v go &> /dev/null; then
+    GO_BIN="go"
+elif [ -x "/opt/homebrew/opt/go/libexec/bin/go" ]; then
+    GO_BIN="/opt/homebrew/opt/go/libexec/bin/go"
+elif [ -x "/usr/local/go/bin/go" ]; then
+    GO_BIN="/usr/local/go/bin/go"
+elif [ -x "$HOME/go/bin/go" ]; then
+    GO_BIN="$HOME/go/bin/go"
+fi
 
-        # Ensure dependencies are downloaded
-        echo -e "${YELLOW}Downloading Go dependencies...${NC}"
-        go mod tidy
+if [ -n "$GO_BIN" ]; then
+    cd "$SCRIPT_DIR"
 
-        # Build all platforms
-        make all
+    # Ensure dependencies are downloaded
+    echo -e "${YELLOW}Downloading Go dependencies...${NC}"
+    $GO_BIN mod tidy
 
-        if [ ! -f "$BINARY_PATH" ]; then
-            echo -e "${RED}Error: Failed to build binary${NC}"
-            exit 1
-        fi
-    else
-        echo -e "${RED}Error: Go is not installed on this machine${NC}"
-        echo ""
-        echo "To install Go:"
-        echo "  macOS:  brew install go"
-        echo "  Ubuntu: sudo apt install golang-go"
-        echo ""
-        echo "Or build the binaries manually first:"
-        echo "  cd ${SCRIPT_DIR}"
-        echo "  make all"
-        echo ""
-        echo "Then run this script again."
+    # Clean old build
+    rm -f "$BINARY_PATH"
+
+    # Build for target architecture
+    echo -e "${YELLOW}Compiling for $ARCH...${NC}"
+    case "$ARCH" in
+        x86_64|amd64)
+            GOOS=linux GOARCH=amd64 $GO_BIN build -ldflags "-s -w" -o "$BINARY_PATH" .
+            ;;
+        mips)
+            GOOS=linux GOARCH=mips GOMIPS=softfloat $GO_BIN build -ldflags "-s -w" -o "$BINARY_PATH" .
+            ;;
+        mipsel|mipsle)
+            GOOS=linux GOARCH=mipsle GOMIPS=softfloat $GO_BIN build -ldflags "-s -w" -o "$BINARY_PATH" .
+            ;;
+        armv7l|armv7)
+            GOOS=linux GOARCH=arm GOARM=7 $GO_BIN build -ldflags "-s -w" -o "$BINARY_PATH" .
+            ;;
+        aarch64|arm64)
+            GOOS=linux GOARCH=arm64 $GO_BIN build -ldflags "-s -w" -o "$BINARY_PATH" .
+            ;;
+    esac
+
+    if [ ! -f "$BINARY_PATH" ]; then
+        echo -e "${RED}Error: Failed to build binary${NC}"
         exit 1
     fi
+
+    echo -e "${GREEN}Build successful: $BINARY_PATH${NC}"
+else
+    echo -e "${RED}Error: Go is not installed on this machine${NC}"
+    echo ""
+    echo "To install Go:"
+    echo "  macOS:  brew install go"
+    echo "  Ubuntu: sudo apt install golang-go"
+    echo ""
+    echo "Or build the binaries manually first:"
+    echo "  cd ${SCRIPT_DIR}"
+    echo "  make all"
+    echo ""
+    echo "Then run this script again."
+    exit 1
 fi
 
 echo ""

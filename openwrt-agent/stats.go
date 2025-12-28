@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -91,23 +92,31 @@ func (c *StatsCollector) Collect() (*SystemStats, error) {
 
 // getRouterIP gets the router's primary IP address
 func (c *StatsCollector) getRouterIP() string {
-	// Try to get the IP from the br-lan interface (common on OpenWrt)
-	data, err := os.ReadFile("/sys/class/net/br-lan/address")
+	// Try ubus first (OpenWrt)
+	cmd := exec.Command("ubus", "call", "network.interface.lan", "status")
+	output, err := cmd.Output()
 	if err == nil {
-		// We have br-lan, now get its IP
-		ifaces := []string{"br-lan", "eth0", "lan"}
-		for _, iface := range ifaces {
-			ip := getInterfaceIP(iface)
-			if ip != "" {
-				return ip
-			}
+		ip := extractIPFromUbus(string(output))
+		if ip != "" {
+			return ip
 		}
 	}
 
-	// Fallback: check common interface names
-	interfaces := []string{"br-lan", "eth0", "eth0.1", "lan", "wan"}
-	for _, iface := range interfaces {
-		ip := getInterfaceIP(iface)
+	// Fallback: use ip command
+	cmd = exec.Command("ip", "-4", "addr", "show", "br-lan")
+	output, err = cmd.Output()
+	if err == nil {
+		ip := extractIPFromIpCmd(string(output))
+		if ip != "" {
+			return ip
+		}
+	}
+
+	// Try eth0 if br-lan doesn't exist
+	cmd = exec.Command("ip", "-4", "addr", "show", "eth0")
+	output, err = cmd.Output()
+	if err == nil {
+		ip := extractIPFromIpCmd(string(output))
 		if ip != "" {
 			return ip
 		}
@@ -116,57 +125,25 @@ func (c *StatsCollector) getRouterIP() string {
 	return ""
 }
 
-// getInterfaceIP reads the IP address for a given interface
-func getInterfaceIP(iface string) string {
-	data, err := os.ReadFile("/proc/net/fib_trie")
-	if err != nil {
-		return ""
+// extractIPFromUbus extracts IP from ubus network.interface.lan status output
+func extractIPFromUbus(output string) string {
+	// Look for "address": "x.x.x.x" pattern
+	re := regexp.MustCompile(`"address"\s*:\s*"(\d+\.\d+\.\d+\.\d+)"`)
+	match := re.FindStringSubmatch(output)
+	if len(match) > 1 {
+		return match[1]
 	}
+	return ""
+}
 
-	// Parse /proc/net/route to find the interface's network
-	routeData, err := os.ReadFile("/proc/net/route")
-	if err != nil {
-		return ""
+// extractIPFromIpCmd extracts IP from 'ip addr show' output
+func extractIPFromIpCmd(output string) string {
+	// Look for inet x.x.x.x/xx pattern
+	re := regexp.MustCompile(`inet\s+(\d+\.\d+\.\d+\.\d+)/`)
+	match := re.FindStringSubmatch(output)
+	if len(match) > 1 {
+		return match[1]
 	}
-
-	lines := strings.Split(string(routeData), "\n")
-	for _, line := range lines[1:] { // Skip header
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		if fields[0] == iface && fields[1] == "00000000" {
-			// This is the default route interface, not what we want
-			continue
-		}
-	}
-
-	// Alternative: read from ip command output or /proc/net/fib_trie
-	// For simplicity, try reading from ubus on OpenWrt
-	cmd := exec.Command("ubus", "call", "network.interface.lan", "status")
-	output, err := cmd.Output()
-	if err == nil {
-		// Parse JSON to find ipv4-address
-		// Simple substring search for IP
-		str := string(output)
-		if idx := strings.Index(str, `"address"`); idx >= 0 {
-			// Find the IP after "address":"
-			rest := str[idx:]
-			if start := strings.Index(rest, `"`); start >= 0 {
-				rest = rest[start+1:]
-				if start := strings.Index(rest, `"`); start >= 0 {
-					rest = rest[start+1:]
-					if end := strings.Index(rest, `"`); end >= 0 {
-						ip := rest[:end]
-						if strings.Contains(ip, ".") {
-							return ip
-						}
-					}
-				}
-			}
-		}
-	}
-
 	return ""
 }
 

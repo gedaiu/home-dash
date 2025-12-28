@@ -217,15 +217,20 @@ func (a *Agent) collectDevices() {
 	}
 }
 
-// runConntrackCollector streams conntrack events
+// runConntrackCollector streams conntrack events and periodically polls for byte counts
 func (a *Agent) runConntrackCollector() {
 	eventChan := make(chan ConntrackEvent, 100)
 
+	// Start event streaming
 	go func() {
 		if err := a.conntrack.Stream(eventChan, a.stopChan); err != nil {
 			log.Printf("Conntrack stream error: %v", err)
 		}
 	}()
+
+	// Periodic polling for connection list with byte counts
+	pollTicker := time.NewTicker(5 * time.Second)
+	defer pollTicker.Stop()
 
 	for {
 		select {
@@ -238,6 +243,21 @@ func (a *Agent) runConntrackCollector() {
 				Time:   time.Now().UnixMilli(),
 				Data:   event,
 			})
+		case <-pollTicker.C:
+			// Poll current connections with byte counts
+			connections, err := a.conntrack.GetActiveConnections()
+			if err != nil {
+				log.Printf("Error polling connections: %v", err)
+				continue
+			}
+			for _, conn := range connections {
+				a.SendMessage(Message{
+					Type:   TypeConntrack,
+					Router: a.config.RouterID,
+					Time:   time.Now().UnixMilli(),
+					Data:   conn,
+				})
+			}
 		}
 	}
 }

@@ -56,8 +56,49 @@ function saveCache() {
   }
 }
 
+// Check if IP is private/reserved and should be skipped
+function isPrivateOrReserved(ip) {
+  if (!ip || typeof ip !== 'string') {
+    return true;
+  }
+
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some(p => isNaN(p) || p < 0 || p > 255)) {
+    return true;
+  }
+
+  const [a, b] = parts;
+
+  // Private ranges
+  if (a === 10) return true;                           // 10.0.0.0/8
+  if (a === 172 && b >= 16 && b <= 31) return true;   // 172.16.0.0/12
+  if (a === 192 && b === 168) return true;            // 192.168.0.0/16
+
+  // Link-local
+  if (a === 169 && b === 254) return true;            // 169.254.0.0/16
+
+  // Loopback
+  if (a === 127) return true;                          // 127.0.0.0/8
+
+  // Multicast
+  if (a >= 224 && a <= 239) return true;              // 224.0.0.0/4
+
+  // Broadcast
+  if (a === 255) return true;                          // 255.0.0.0/8
+
+  // Current network
+  if (a === 0) return true;                            // 0.0.0.0/8
+
+  return false;
+}
+
 // Lookup IP address
 async function lookup(ip) {
+  // Skip private/reserved IPs
+  if (isPrivateOrReserved(ip)) {
+    return null;
+  }
+
   // Check cache first
   const cached = cache.get(ip);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -95,6 +136,8 @@ async function lookup(ip) {
 
     return data;
   } catch (err) {
+    // Cache failed lookups to prevent repeated API calls for the same IP
+    cache.set(ip, { data: null, timestamp: Date.now() });
     console.error(`[geoip] Lookup failed for ${ip}:`, err.message);
     return null;
   }
@@ -113,7 +156,22 @@ async function fetchFromIpApi(ip) {
   const url = `http://ip-api.com/json/${ip}?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,asname`;
 
   const response = await fetch(url);
-  const json = await response.json();
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+
+  const text = await response.text();
+  if (!text || text.trim() === '') {
+    throw new Error('Empty response from ip-api.com');
+  }
+
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
+  }
 
   if (json.status === 'fail') {
     throw new Error(json.message);

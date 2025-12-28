@@ -34,7 +34,7 @@ async function connect(timeout = CONNECTION_TIMEOUT_MS) {
 
   return new Promise((resolve) => {
     const timeoutId = setTimeout(() => {
-      console.error('[roomba] Connection timeout');
+      logToUI('Connection timeout', 'error');
       disconnect();
       resolve(null);
     }, timeout);
@@ -58,7 +58,7 @@ async function connect(timeout = CONNECTION_TIMEOUT_MS) {
 
       mqttClient.on('connect', () => {
         clearTimeout(timeoutId);
-        console.log('[roomba] Connected');
+        logToUI(`Connected to ${config.ip}`);
         mqttClient.subscribe('#');
         resolve(mqttClient);
       });
@@ -76,14 +76,14 @@ async function connect(timeout = CONNECTION_TIMEOUT_MS) {
 
       mqttClient.on('error', (err) => {
         clearTimeout(timeoutId);
-        console.error('[roomba] Connection error:', err.message);
+        logToUI(`Connection error: ${err.message}`, 'error');
         disconnect();
         resolve(null);
       });
 
       mqttClient.on('offline', () => {
         clearTimeout(timeoutId);
-        console.error('[roomba] Robot went offline');
+        logToUI('Robot went offline', 'warning');
         disconnect();
         resolve(null);
       });
@@ -93,7 +93,7 @@ async function connect(timeout = CONNECTION_TIMEOUT_MS) {
       });
     } catch (err) {
       clearTimeout(timeoutId);
-      console.error('[roomba] Failed to create connection:', err.message);
+      logToUI(`Failed to create connection: ${err.message}`, 'error');
       resolve(null);
     }
   });
@@ -312,7 +312,7 @@ function sendCommand(command, params = {}) {
     throw new Error('Not connected to Roomba');
   }
 
-  const config = getConfig();
+  logToUI(`Sending command: ${command}`);
   const topic = `cmd`;
   const message = JSON.stringify({
     command,
@@ -379,6 +379,13 @@ function broadcast(type, data) {
   }
 }
 
+function logToUI(message, level = 'info') {
+  console.log(`[Roomba] ${message}`);
+  if (broadcastFn) {
+    broadcastFn({ type: 'log', data: { source: 'Roomba', message, level } });
+  }
+}
+
 async function pollRoomba() {
   if (!isConfigured()) {
     return;
@@ -387,10 +394,15 @@ async function pollRoomba() {
   try {
     const status = await getStatus();
     if (status) {
+      if (status.connected) {
+        logToUI(`${status.name}: ${status.mission?.phase || 'unknown'}, battery ${status.battery?.percent || '?'}%`);
+      } else if (status.error) {
+        logToUI(`${status.name}: ${status.error}`, 'warning');
+      }
       broadcast('roomba', status);
     }
-  } catch {
-    // Ignore polling errors
+  } catch (err) {
+    logToUI(`Poll error: ${err.message}`, 'error');
   }
 }
 
@@ -399,6 +411,7 @@ function startPolling() {
     return;
   }
 
+  logToUI('Starting polling (every 30s)');
   pollTimer = setInterval(pollRoomba, POLL_INTERVAL_MS);
   pollRoomba();
 }

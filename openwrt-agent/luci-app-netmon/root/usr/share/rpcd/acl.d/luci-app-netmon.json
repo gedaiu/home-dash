@@ -2,22 +2,28 @@
 	"luci-app-netmon": {
 		"description": "Grant access for luci-app-netmon",
 		"read": {
+			"cgi-io": [ "exec" ],
 			"file": {
 				"/etc/config/netmon": [ "read" ],
-				"/bin/sh -c pgrep*": [ "exec" ],
-				"/bin/sh -c pgrep -f netmon-agent*": [ "exec" ],
-				"/etc/init.d/netmon restart": [ "exec" ]
+				"/tmp/dhcp.leases": [ "read" ],
+				"/proc/net/dev": [ "read" ],
+				"/proc/sys/net/netfilter/nf_conntrack_count": [ "read" ],
+				"/sys/class/thermal/thermal_zone0/temp": [ "read" ],
+				"/bin/sh -c *": [ "exec" ]
 			},
 			"ubus": {
-				"file": [ "read", "exec" ],
+				"file": [ "read", "exec", "list", "stat" ],
 				"system": [ "info" ],
 				"uci": [ "get", "state" ]
 			},
 			"uci": [ "netmon" ]
 		},
 		"write": {
+			"cgi-io": [ "exec" ],
 			"file": {
-				"/etc/init.d/netmon restart": [ "exec" ]
+				"/etc/init.d/netmon restart": [ "exec" ],
+				"/etc/init.d/netmon *": [ "exec" ],
+				"/bin/sh -c *": [ "exec" ]
 			},
 			"ubus": {
 				"file": [ "exec" ]

@@ -475,6 +475,26 @@ function setAirPurifierCounter(index, counter) {
   setCoapState(state);
 }
 
+function getWeather() {
+  return load().weather || null;
+}
+
+function setWeather(weatherConfig) {
+  const config = load();
+  config.weather = weatherConfig;
+  save(config);
+}
+
+function getTransport() {
+  return load().transport || null;
+}
+
+function setTransport(transportConfig) {
+  const config = load();
+  config.transport = transportConfig;
+  save(config);
+}
+
 module.exports = {
   load,
   save,
@@ -512,5 +532,9 @@ module.exports = {
   setPanelName,
   deletePanelName,
   getAirPurifierCounter,
-  setAirPurifierCounter
+  setAirPurifierCounter,
+  getWeather,
+  setWeather,
+  getTransport,
+  setTransport
 };

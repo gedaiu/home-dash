@@ -1,66 +1,22 @@
 import { html } from 'https://esm.sh/htm@3.1.1/preact';
-import { useEffect, useRef, useState } from 'https://esm.sh/preact@10.19.3/hooks';
+import { useEffect, useState, useRef } from 'https://esm.sh/preact@10.19.3/hooks';
 import { effect } from 'https://esm.sh/@preact/signals@1.2.1';
 import { openwrtState, selectedDeviceMac } from '../state.js';
 
-let d3Promise = null;
-
-function loadD3() {
-  if (!d3Promise) {
-    d3Promise = import('https://esm.sh/d3@7.8.5');
-  }
-  return d3Promise;
-}
-
-function getNodeColor(node, isSelected, isConnectedToSelected) {
-  if (isSelected) {
-    return '#00ff88';
-  }
-  if (isConnectedToSelected) {
-    return '#ffff00';
-  }
-  if (node.type === 'device') {
-    return node.online ? '#ff8c00' : '#4a4a4a';
-  }
-
-  const countryColors = {
-    'US': '#ff6b35',
-    'DE': '#ffa500',
-    'GB': '#ffb347',
-    'NL': '#ffd700',
-    'FR': '#ff9500',
-    'CN': '#ff4500',
-    'JP': '#ff7f50',
-    'KR': '#ff6347',
-    'AU': '#ffae42',
-    'CA': '#ff8c00'
-  };
-
-  return countryColors[node.country] || '#cc7000';
-}
-
-function getNodeRadius(node, isSelected) {
-  const baseRadius = node.type === 'device' ? 16 : Math.min(12 + Math.log2((node.connectionCount || 1) + 1) * 4, 28);
-  return isSelected ? baseRadius * 1.3 : baseRadius;
-}
-
-function buildGraphData(connections, devices) {
-  const nodes = [];
-  const links = [];
-  const nodeMap = new Map();
+function buildConnectionData(connections, devices) {
+  const deviceMap = new Map();
+  const destinationMap = new Map();
 
   devices.forEach(device => {
-    const id = `device:${device.mac}`;
-    if (!nodeMap.has(id)) {
-      nodeMap.set(id, {
-        id,
-        type: 'device',
-        label: device.hostname || device.mac.substring(0, 8),
-        mac: device.mac,
-        ip: device.ip,
-        online: device.online
-      });
-    }
+    deviceMap.set(device.mac, {
+      mac: device.mac,
+      hostname: device.hostname || device.mac.substring(0, 8),
+      ip: device.ip,
+      online: device.online,
+      totalBytes: 0,
+      connectionCount: 0,
+      destinations: new Map()
+    });
   });
 
   connections.forEach(conn => {
@@ -68,453 +24,423 @@ function buildGraphData(connections, devices) {
       return;
     }
 
-    const srcId = `device:${conn.srcMac}`;
+    if (!deviceMap.has(conn.srcMac)) {
+      deviceMap.set(conn.srcMac, {
+        mac: conn.srcMac,
+        hostname: conn.srcHostname || conn.srcMac.substring(0, 8),
+        ip: conn.src_ip,
+        online: true,
+        totalBytes: 0,
+        connectionCount: 0,
+        destinations: new Map()
+      });
+    }
+
+    const device = deviceMap.get(conn.srcMac);
     const org = conn.enriched.org || conn.enriched.asName || conn.enriched.isp;
     const country = conn.enriched.country;
     const dstLabel = org || country || conn.dst_ip;
-    const dstId = `external:${dstLabel}`;
+    const bytes = conn.bytes || 0;
 
-    if (!nodeMap.has(srcId)) {
-      nodeMap.set(srcId, {
-        id: srcId,
-        type: 'device',
-        label: conn.srcHostname || conn.srcMac?.substring(0, 8) || 'Unknown',
-        mac: conn.srcMac,
-        ip: conn.src_ip,
-        online: true
-      });
+    device.totalBytes += bytes;
+    device.connectionCount += 1;
+
+    if (!device.destinations.has(dstLabel)) {
+      device.destinations.set(dstLabel, { label: dstLabel, country, org, bytes: 0, count: 0 });
     }
+    const dest = device.destinations.get(dstLabel);
+    dest.bytes += bytes;
+    dest.count += 1;
 
-    if (!nodeMap.has(dstId)) {
-      nodeMap.set(dstId, {
-        id: dstId,
-        type: 'external',
-        label: dstLabel,
-        country: country,
-        org: org,
-        connectionCount: 0
-      });
+    if (!destinationMap.has(dstLabel)) {
+      destinationMap.set(dstLabel, { label: dstLabel, country, org, totalBytes: 0, devices: new Set() });
     }
-
-    const dstNode = nodeMap.get(dstId);
-    dstNode.connectionCount = (dstNode.connectionCount || 0) + 1;
-
-    const linkId = `${srcId}->${dstId}`;
-    const existingLink = links.find(l => l.id === linkId);
-    if (existingLink) {
-      existingLink.weight += 1;
-      existingLink.bytes += (conn.bytes || 0);
-    } else {
-      links.push({
-        id: linkId,
-        source: srcId,
-        target: dstId,
-        weight: 1,
-        bytes: conn.bytes || 0,
-        protocol: conn.protocol,
-        srcMac: conn.srcMac
-      });
-    }
+    const destGlobal = destinationMap.get(dstLabel);
+    destGlobal.totalBytes += bytes;
+    destGlobal.devices.add(conn.srcMac);
   });
 
-  nodeMap.forEach(node => nodes.push(node));
+  const deviceList = Array.from(deviceMap.values())
+    .map(d => ({ ...d, destinations: Array.from(d.destinations.values()).sort((a, b) => b.bytes - a.bytes) }))
+    .sort((a, b) => b.totalBytes - a.totalBytes);
 
-  return { nodes, links };
+  const destinationList = Array.from(destinationMap.values())
+    .sort((a, b) => b.totalBytes - a.totalBytes)
+    .slice(0, 30);
+
+  return { devices: deviceList, destinations: destinationList };
+}
+
+function formatBytes(bytes) {
+  if (!bytes || bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
+}
+
+function getCountryColor(country) {
+  const colors = {
+    'US': '#ff6b35', 'DE': '#ffa500', 'GB': '#ffb347', 'NL': '#ffd700',
+    'FR': '#ff9500', 'CN': '#ff4500', 'JP': '#ff7f50', 'KR': '#ff6347',
+    'AU': '#ffae42', 'CA': '#ff8c00', 'IE': '#32cd32', 'SG': '#ff69b4'
+  };
+  return colors[country] || '#cc7000';
 }
 
 export function ConnectionGraph() {
-  const containerRef = useRef(null);
-  const svgRef = useRef(null);
-  const simulationRef = useRef(null);
-  const [d3, setD3] = useState(null);
-  const [graphData, setGraphData] = useState({ nodes: [], links: [] });
-  const [selectedNode, setSelectedNode] = useState(null);
-  const [highlightedMac, setHighlightedMac] = useState(null);
+  const [data, setData] = useState({ devices: [], destinations: [] });
+  const [selectedMac, setSelectedMac] = useState(null);
+  const [selectedDest, setSelectedDest] = useState(null);
+  const [hoveredDest, setHoveredDest] = useState(null);
+  const canvasRef = useRef(null);
 
   useEffect(() => {
-    loadD3().then(setD3);
-  }, []);
-
-  useEffect(() => {
+    let lastUpdate = 0;
     const dispose = effect(() => {
       const state = openwrtState.value;
-      const data = buildGraphData(state.connections || [], state.devices || []);
-      setGraphData(data);
+      const now = Date.now();
+      if (now - lastUpdate < 3000) return;
+      lastUpdate = now;
+      setData(buildConnectionData(state.connections || [], state.devices || []));
     });
     return dispose;
   }, []);
 
   useEffect(() => {
-    const dispose = effect(() => {
-      setHighlightedMac(selectedDeviceMac.value);
-    });
+    const dispose = effect(() => setSelectedMac(selectedDeviceMac.value));
     return dispose;
   }, []);
 
   useEffect(() => {
-    if (!d3 || !containerRef.current) {
-      return;
+    const canvas = canvasRef.current;
+    if (!canvas || data.devices.length === 0) return;
+
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const width = rect.width;
+    const height = rect.height;
+
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    ctx.scale(dpr, dpr);
+
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const innerRadius = Math.min(width, height) * 0.15;
+    const outerRadius = Math.min(width, height) * 0.42;
+
+    // Clear
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(0, 0, width, height);
+
+    // Draw grid circles
+    ctx.strokeStyle = 'rgba(255, 140, 0, 0.1)';
+    ctx.lineWidth = 1;
+    for (let r = innerRadius; r <= outerRadius; r += (outerRadius - innerRadius) / 3) {
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
+      ctx.stroke();
     }
 
-    const container = containerRef.current;
-    const width = container.clientWidth || 800;
-    const height = container.clientHeight || 600;
-
-    d3.select(container).selectAll('svg').remove();
-
-    const svg = d3.select(container)
-      .append('svg')
-      .attr('width', '100%')
-      .attr('height', '100%')
-      .attr('viewBox', `0 0 ${width} ${height}`)
-      .attr('preserveAspectRatio', 'xMidYMid meet');
-
-    svgRef.current = svg;
-
-    const defs = svg.append('defs');
-
-    const glowFilter = defs.append('filter')
-      .attr('id', 'glow')
-      .attr('x', '-50%')
-      .attr('y', '-50%')
-      .attr('width', '200%')
-      .attr('height', '200%');
-
-    glowFilter.append('feGaussianBlur')
-      .attr('stdDeviation', '3')
-      .attr('result', 'coloredBlur');
-
-    const feMerge = glowFilter.append('feMerge');
-    feMerge.append('feMergeNode').attr('in', 'coloredBlur');
-    feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
-
-    const highlightFilter = defs.append('filter')
-      .attr('id', 'highlight-glow')
-      .attr('x', '-100%')
-      .attr('y', '-100%')
-      .attr('width', '300%')
-      .attr('height', '300%');
-
-    highlightFilter.append('feGaussianBlur')
-      .attr('stdDeviation', '6')
-      .attr('result', 'coloredBlur');
-
-    const highlightMerge = highlightFilter.append('feMerge');
-    highlightMerge.append('feMergeNode').attr('in', 'coloredBlur');
-    highlightMerge.append('feMergeNode').attr('in', 'coloredBlur');
-    highlightMerge.append('feMergeNode').attr('in', 'SourceGraphic');
-
-    const g = svg.append('g');
-
-    const zoom = d3.zoom()
-      .scaleExtent([0.2, 4])
-      .on('zoom', (event) => {
-        g.attr('transform', event.transform);
-      });
-
-    svg.call(zoom);
-
-    const linkGroup = g.append('g').attr('class', 'links');
-    const nodeGroup = g.append('g').attr('class', 'nodes');
-    const labelGroup = g.append('g').attr('class', 'labels');
-
-    const padding = 60;
-    const simulation = d3.forceSimulation()
-      .force('link', d3.forceLink().id(d => d.id).distance(140).strength(0.4))
-      .force('charge', d3.forceManyBody().strength(-400))
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius(d => getNodeRadius(d, false) + 25))
-      .force('x', d3.forceX(width / 2).strength(0.08))
-      .force('y', d3.forceY(height / 2).strength(0.08));
-
-    simulationRef.current = { simulation, svg, g, linkGroup, nodeGroup, labelGroup, d3, width, height, padding, zoom };
-
-  }, [d3]);
-
-  useEffect(() => {
-    if (!simulationRef.current || graphData.nodes.length === 0) {
-      return;
-    }
-
-    const { simulation, linkGroup, nodeGroup, labelGroup, d3, width, height, padding } = simulationRef.current;
-
-    const oldNodes = new Map(simulation.nodes().map(d => [d.id, d]));
-    const nodes = graphData.nodes.map(d => ({ ...d, ...oldNodes.get(d.id) }));
-    const links = graphData.links.map(d => ({ ...d }));
-
-    const connectedToSelected = new Set();
-    if (highlightedMac) {
-      links.forEach(l => {
-        if (l.srcMac === highlightedMac) {
-          connectedToSelected.add(typeof l.target === 'object' ? l.target.id : l.target);
-        }
-      });
-    }
-
-    linkGroup.selectAll('line').remove();
-    nodeGroup.selectAll('circle').remove();
-    labelGroup.selectAll('text').remove();
-
-    const link = linkGroup.selectAll('line')
-      .data(links, d => d.id)
-      .join('line')
-      .attr('stroke', d => {
-        if (highlightedMac && d.srcMac === highlightedMac) {
-          return '#00ff88';
-        }
-        return '#ff8c00';
-      })
-      .attr('stroke-opacity', d => {
-        if (highlightedMac) {
-          return d.srcMac === highlightedMac ? 0.9 : 0.15;
-        }
-        return 0.5;
-      })
-      .attr('stroke-width', d => {
-        if (highlightedMac && d.srcMac === highlightedMac) {
-          return Math.min(3 + Math.log2(d.weight + 1) * 2, 8);
-        }
-        return Math.min(2 + Math.log2(d.weight + 1) * 1.5, 6);
-      })
-      .attr('filter', d => {
-        if (highlightedMac && d.srcMac === highlightedMac) {
-          return 'url(#highlight-glow)';
-        }
-        return 'url(#glow)';
-      });
-
-    const node = nodeGroup.selectAll('circle')
-      .data(nodes, d => d.id)
-      .join('circle')
-      .attr('r', d => {
-        const isSelected = highlightedMac && d.mac === highlightedMac;
-        return getNodeRadius(d, isSelected);
-      })
-      .attr('fill', d => {
-        const isSelected = highlightedMac && d.mac === highlightedMac;
-        const isConnectedToSelected = connectedToSelected.has(d.id);
-        return getNodeColor(d, isSelected, isConnectedToSelected);
-      })
-      .attr('stroke', d => {
-        const isSelected = highlightedMac && d.mac === highlightedMac;
-        return isSelected ? '#00ff88' : '#1a1a1a';
-      })
-      .attr('stroke-width', d => {
-        const isSelected = highlightedMac && d.mac === highlightedMac;
-        return isSelected ? 4 : 2;
-      })
-      .attr('filter', d => {
-        const isSelected = highlightedMac && d.mac === highlightedMac;
-        return isSelected ? 'url(#highlight-glow)' : 'url(#glow)';
-      })
-      .attr('opacity', d => {
-        if (!highlightedMac) {
-          return 1;
-        }
-        const isSelected = d.mac === highlightedMac;
-        const isConnectedToSelected = connectedToSelected.has(d.id);
-        return (isSelected || isConnectedToSelected) ? 1 : 0.3;
-      })
-      .attr('cursor', 'pointer')
-      .on('click', (event, d) => {
-        event.stopPropagation();
-        if (d.type === 'device') {
-          selectedDeviceMac.value = selectedDeviceMac.value === d.mac ? null : d.mac;
-        }
-        setSelectedNode(selectedNode?.id === d.id ? null : d);
-      })
-      .call(d3.drag()
-        .on('start', (event, d) => {
-          if (!event.active) {
-            simulation.alphaTarget(0.3).restart();
-          }
-          d.fx = d.x;
-          d.fy = d.y;
-        })
-        .on('drag', (event, d) => {
-          d.fx = Math.max(padding, Math.min(width - padding, event.x));
-          d.fy = Math.max(padding, Math.min(height - padding, event.y));
-        })
-        .on('end', (event, d) => {
-          if (!event.active) {
-            simulation.alphaTarget(0);
-          }
-          d.fx = null;
-          d.fy = null;
-        }));
-
-    const label = labelGroup.selectAll('text')
-      .data(nodes.filter(d => d.type === 'device' || (d.connectionCount && d.connectionCount > 1)), d => d.id)
-      .join('text')
-      .attr('font-size', d => d.type === 'device' ? '13px' : '12px')
-      .attr('fill', d => {
-        const isSelected = highlightedMac && d.mac === highlightedMac;
-        return isSelected ? '#00ff88' : '#ff8c00';
-      })
-      .attr('text-anchor', 'middle')
-      .attr('dy', d => getNodeRadius(d, highlightedMac && d.mac === highlightedMac) + 18)
-      .attr('font-family', 'monospace')
-      .attr('font-weight', d => {
-        const isSelected = highlightedMac && d.mac === highlightedMac;
-        return isSelected ? 'bold' : 'normal';
-      })
-      .attr('opacity', d => {
-        if (!highlightedMac) {
-          return 1;
-        }
-        const isSelected = d.mac === highlightedMac;
-        const isConnectedToSelected = connectedToSelected.has(d.id);
-        return (isSelected || isConnectedToSelected) ? 1 : 0.3;
-      })
-      .text(d => d.label);
-
-    simulation.nodes(nodes);
-    simulation.force('link').links(links);
-    simulation.alpha(0.3).restart();
-
-    simulation.on('tick', () => {
-      nodes.forEach(d => {
-        d.x = Math.max(padding, Math.min(width - padding, d.x));
-        d.y = Math.max(padding, Math.min(height - padding, d.y));
-      });
-
-      link
-        .attr('x1', d => d.source.x)
-        .attr('y1', d => d.source.y)
-        .attr('x2', d => d.target.x)
-        .attr('y2', d => d.target.y);
-
-      node
-        .attr('cx', d => d.x)
-        .attr('cy', d => d.y);
-
-      label
-        .attr('x', d => d.x)
-        .attr('y', d => d.y);
-    });
-
-  }, [graphData, highlightedMac]);
-
-  const hasData = graphData.nodes.length > 0;
-
-  const handleCloseDetails = () => {
-    if (selectedNode?.type === 'device') {
-      selectedDeviceMac.value = null;
-    }
-    setSelectedNode(null);
-  };
-
-  const formatBytes = (bytes) => {
-    if (!bytes || bytes === 0) {
-      return '0 B';
-    }
-    const units = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
-  };
-
-  const getDeviceStats = (mac) => {
-    const deviceLinks = graphData.links.filter(l => l.srcMac === mac);
-    const totalBytes = deviceLinks.reduce((sum, l) => sum + (l.bytes || 0), 0);
-    const connectionCount = deviceLinks.length;
-    const destinations = deviceLinks.map(l => {
-      const targetId = typeof l.target === 'object' ? l.target.id : l.target;
-      const targetNode = graphData.nodes.find(n => n.id === targetId);
+    // Position destinations around outer ring
+    const destinations = data.destinations;
+    const destPositions = destinations.map((dest, i) => {
+      const angle = (i / destinations.length) * Math.PI * 2 - Math.PI / 2;
       return {
-        name: targetNode?.label || 'Unknown',
-        country: targetNode?.country,
-        bytes: l.bytes || 0,
-        weight: l.weight || 1
+        ...dest,
+        x: centerX + Math.cos(angle) * outerRadius,
+        y: centerY + Math.sin(angle) * outerRadius,
+        angle
       };
-    }).sort((a, b) => b.bytes - a.bytes).slice(0, 5);
+    });
 
-    return { totalBytes, connectionCount, destinations };
+    // Position devices in inner ring
+    const devices = data.devices.filter(d => d.connectionCount > 0);
+    const devicePositions = devices.map((device, i) => {
+      const angle = (i / devices.length) * Math.PI * 2 - Math.PI / 2;
+      return {
+        ...device,
+        x: centerX + Math.cos(angle) * innerRadius,
+        y: centerY + Math.sin(angle) * innerRadius,
+        angle
+      };
+    });
+
+    // Draw connections
+    devicePositions.forEach(device => {
+      const isDeviceSelected = selectedMac === device.mac;
+
+      device.destinations.forEach(dest => {
+        const destPos = destPositions.find(d => d.label === dest.label);
+        if (!destPos) return;
+
+        const isDestSelected = selectedDest === dest.label;
+        const isHighlighted = isDeviceSelected || isDestSelected || hoveredDest === dest.label;
+
+        let alpha;
+        if (selectedMac) {
+          alpha = isDeviceSelected ? 0.6 : 0.05;
+        } else if (selectedDest) {
+          alpha = isDestSelected ? 0.6 : 0.05;
+        } else if (hoveredDest) {
+          alpha = hoveredDest === dest.label ? 0.6 : 0.05;
+        } else {
+          alpha = 0.2;
+        }
+
+        const lineWidth = isHighlighted ? Math.min(1 + Math.log2(dest.bytes / 1000 + 1) * 0.5, 4) : 1;
+
+        ctx.beginPath();
+        ctx.strokeStyle = isHighlighted ? getCountryColor(dest.country) : `rgba(255, 140, 0, ${alpha})`;
+        ctx.lineWidth = lineWidth;
+
+        // Curved line
+        const midX = centerX;
+        const midY = centerY;
+        ctx.moveTo(device.x, device.y);
+        ctx.quadraticCurveTo(midX, midY, destPos.x, destPos.y);
+        ctx.stroke();
+      });
+    });
+
+    // Draw destination nodes
+    destPositions.forEach(dest => {
+      const isHovered = hoveredDest === dest.label;
+      const isSelected = selectedDest === dest.label;
+      const hasConnectionToSelectedDevice = selectedMac ? devices.find(d => d.mac === selectedMac)?.destinations.some(dd => dd.label === dest.label) : true;
+
+      let alpha;
+      if (selectedMac) {
+        alpha = hasConnectionToSelectedDevice ? 1 : 0.2;
+      } else if (selectedDest) {
+        alpha = isSelected ? 1 : 0.2;
+      } else if (hoveredDest) {
+        alpha = isHovered ? 1 : 0.2;
+      } else {
+        alpha = 0.8;
+      }
+
+      const radius = (isHovered || isSelected) ? 12 : 6 + Math.min(Math.log2(dest.devices.size + 1) * 2, 6);
+
+      ctx.beginPath();
+      ctx.arc(dest.x, dest.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = getCountryColor(dest.country);
+      ctx.globalAlpha = alpha;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Highlight ring for selected destination
+      if (isSelected) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      // Label
+      if (isHovered || isSelected || (!selectedMac && !selectedDest && !hoveredDest)) {
+        ctx.fillStyle = `rgba(255, 140, 0, ${alpha})`;
+        ctx.font = (isSelected ? 'bold ' : '') + '11px monospace';
+        ctx.textAlign = dest.x > centerX ? 'left' : 'right';
+        ctx.textBaseline = 'middle';
+        const labelX = dest.x + (dest.x > centerX ? 14 : -14);
+        const label = dest.label.length > 20 ? dest.label.substring(0, 18) + '...' : dest.label;
+        ctx.fillText(label, labelX, dest.y);
+      }
+    });
+
+    // Draw device nodes
+    devicePositions.forEach(device => {
+      const isSelected = selectedMac === device.mac;
+      const isConnectedToSelectedDest = selectedDest && device.destinations.some(d => d.label === selectedDest);
+      const isHighlighted = isSelected || isConnectedToSelectedDest;
+
+      let alpha = 1;
+      if (selectedDest && !isConnectedToSelectedDest) {
+        alpha = 0.3;
+      }
+
+      const radius = isHighlighted ? 14 : 10;
+
+      ctx.beginPath();
+      ctx.arc(device.x, device.y, radius, 0, Math.PI * 2);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = isHighlighted ? '#00ff88' : (device.online ? '#00d4aa' : '#4a4a4a');
+      ctx.fill();
+      ctx.strokeStyle = isHighlighted ? '#00ff88' : '#1a1a1a';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      // Label
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = isHighlighted ? '#00ff88' : '#00d4aa';
+      ctx.font = isHighlighted ? 'bold 12px monospace' : '11px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(device.hostname, device.x, device.y + radius + 4);
+      ctx.globalAlpha = 1;
+    });
+
+    // Store positions for click detection
+    canvas._devicePositions = devicePositions;
+    canvas._destPositions = destPositions;
+
+  }, [data, selectedMac, selectedDest, hoveredDest]);
+
+  const handleCanvasClick = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas._devicePositions) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    // Check device clicks first
+    for (const device of canvas._devicePositions) {
+      const dx = x - device.x;
+      const dy = y - device.y;
+      if (dx * dx + dy * dy < 200) {
+        const newMac = selectedMac === device.mac ? null : device.mac;
+        setSelectedMac(newMac);
+        selectedDeviceMac.value = newMac;
+        setSelectedDest(null);
+        return;
+      }
+    }
+
+    // Check destination clicks
+    for (const dest of canvas._destPositions || []) {
+      const dx = x - dest.x;
+      const dy = y - dest.y;
+      if (dx * dx + dy * dy < 200) {
+        const newDest = selectedDest === dest.label ? null : dest.label;
+        setSelectedDest(newDest);
+        setSelectedMac(null);
+        selectedDeviceMac.value = null;
+        return;
+      }
+    }
+
+    // Click on empty space clears selection
+    setSelectedMac(null);
+    setSelectedDest(null);
+    selectedDeviceMac.value = null;
   };
 
-  const deviceStats = selectedNode?.type === 'device' ? getDeviceStats(selectedNode.mac) : null;
+  const handleCanvasMove = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas._destPositions) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    for (const dest of canvas._destPositions) {
+      const dx = x - dest.x;
+      const dy = y - dest.y;
+      if (dx * dx + dy * dy < 200) {
+        if (hoveredDest !== dest.label) setHoveredDest(dest.label);
+        return;
+      }
+    }
+
+    if (hoveredDest) setHoveredDest(null);
+  };
+
+  const selectedDevice = selectedMac ? data.devices.find(d => d.mac === selectedMac) : null;
+  const selectedDestination = selectedDest ? data.destinations.find(d => d.label === selectedDest) : null;
+
+  // Get connected devices for selected destination
+  const connectedDevices = selectedDestination
+    ? data.devices.filter(d => d.destinations.some(dest => dest.label === selectedDest))
+        .map(d => ({
+          ...d,
+          bytesToDest: d.destinations.find(dest => dest.label === selectedDest)?.bytes || 0
+        }))
+        .sort((a, b) => b.bytesToDest - a.bytesToDest)
+    : [];
+
+  const hasData = data.devices.length > 0;
 
   return html`
-    <div class="connection-graph-container">
-      <div class="graph-wrapper" ref=${containerRef}>
+    <div class="radial-graph-container">
+      <div class="radial-canvas-wrapper">
+        <canvas
+          ref=${canvasRef}
+          onClick=${handleCanvasClick}
+          onMouseMove=${handleCanvasMove}
+          onMouseLeave=${() => setHoveredDest(null)}
+        />
         ${!hasData && html`
-          <div class="graph-empty">
-            <i data-lucide="share-2"></i>
+          <div class="radial-empty">
             <span>Waiting for connection data...</span>
           </div>
         `}
       </div>
-      ${selectedNode && html`
-        <div class="node-details">
-          <div class="node-details-header">
-            <span class="node-type ${selectedNode.type}">${selectedNode.type.toUpperCase()}</span>
-            <button class="close-btn" onClick=${handleCloseDetails}>x</button>
+
+      ${selectedDevice && html`
+        <div class="radial-details">
+          <div class="radial-details-header">
+            <span class="device-name">${selectedDevice.hostname}</span>
+            <button class="close-btn" onClick=${() => { setSelectedMac(null); selectedDeviceMac.value = null; }}>x</button>
           </div>
-          <div class="node-details-content">
-            <div class="detail-row">
-              <span class="label">Name:</span>
-              <span class="value">${selectedNode.label}</span>
+          <div class="radial-details-info">
+            <span class="device-ip">${selectedDevice.ip}</span>
+            <span class="device-mac">${selectedDevice.mac}</span>
+          </div>
+          <div class="radial-details-stats">
+            <div class="stat">
+              <span class="stat-value">${formatBytes(selectedDevice.totalBytes)}</span>
+              <span class="stat-label">traffic</span>
             </div>
-            ${selectedNode.type === 'device' && html`
-              <div class="detail-row">
-                <span class="label">MAC:</span>
-                <span class="value">${selectedNode.mac}</span>
+            <div class="stat">
+              <span class="stat-value">${selectedDevice.connectionCount}</span>
+              <span class="stat-label">connections</span>
+            </div>
+          </div>
+          <div class="radial-destinations">
+            ${selectedDevice.destinations.slice(0, 8).map(dest => html`
+              <div class="radial-dest-row">
+                <span class="dest-color" style="background: ${getCountryColor(dest.country)}"></span>
+                <span class="dest-label">${dest.label}</span>
+                <span class="dest-bytes">${formatBytes(dest.bytes)}</span>
               </div>
-              <div class="detail-row">
-                <span class="label">IP:</span>
-                <span class="value">${selectedNode.ip}</span>
+            `)}
+          </div>
+        </div>
+      `}
+
+      ${selectedDestination && html`
+        <div class="radial-details">
+          <div class="radial-details-header">
+            <span class="device-name" style="color: ${getCountryColor(selectedDestination.country)}">${selectedDestination.label}</span>
+            <button class="close-btn" onClick=${() => setSelectedDest(null)}>x</button>
+          </div>
+          <div class="radial-details-info">
+            <span class="device-ip">${selectedDestination.country || 'Unknown'}</span>
+            <span class="device-mac">${selectedDestination.org || ''}</span>
+          </div>
+          <div class="radial-details-stats">
+            <div class="stat">
+              <span class="stat-value">${formatBytes(selectedDestination.totalBytes)}</span>
+              <span class="stat-label">traffic</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value">${connectedDevices.length}</span>
+              <span class="stat-label">devices</span>
+            </div>
+          </div>
+          <div class="radial-destinations">
+            ${connectedDevices.slice(0, 8).map(device => html`
+              <div class="radial-dest-row">
+                <span class="dest-color" style="background: #00d4aa"></span>
+                <span class="dest-label">${device.hostname}</span>
+                <span class="dest-bytes">${formatBytes(device.bytesToDest)}</span>
               </div>
-              <div class="detail-row">
-                <span class="label">Status:</span>
-                <span class="value ${selectedNode.online ? 'online' : 'offline'}">
-                  ${selectedNode.online ? 'Online' : 'Offline'}
-                </span>
-              </div>
-              ${deviceStats && html`
-                <div class="detail-section">
-                  <div class="detail-section-title">Traffic</div>
-                  <div class="detail-row">
-                    <span class="label">Total:</span>
-                    <span class="value">${formatBytes(deviceStats.totalBytes)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="label">Connections:</span>
-                    <span class="value">${deviceStats.connectionCount}</span>
-                  </div>
-                </div>
-                ${deviceStats.destinations.length > 0 && html`
-                  <div class="detail-section">
-                    <div class="detail-section-title">Top Destinations</div>
-                    ${deviceStats.destinations.map(dest => html`
-                      <div class="detail-row destination-row">
-                        <span class="dest-name">
-                          ${dest.country ? html`<span class="dest-country">${dest.country}</span>` : ''}
-                          ${dest.name}
-                        </span>
-                        <span class="dest-bytes">${formatBytes(dest.bytes)}</span>
-                      </div>
-                    `)}
-                  </div>
-                `}
-              `}
-            `}
-            ${selectedNode.type === 'external' && html`
-              ${selectedNode.country && html`
-                <div class="detail-row">
-                  <span class="label">Country:</span>
-                  <span class="value">${selectedNode.country}</span>
-                </div>
-              `}
-              ${selectedNode.org && html`
-                <div class="detail-row">
-                  <span class="label">Organization:</span>
-                  <span class="value">${selectedNode.org}</span>
-                </div>
-              `}
-              <div class="detail-row">
-                <span class="label">Connections:</span>
-                <span class="value">${selectedNode.connectionCount || 0}</span>
-              </div>
-            `}
+            `)}
           </div>
         </div>
       `}

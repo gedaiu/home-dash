@@ -27,6 +27,13 @@ function broadcast(data) {
   }
 }
 
+function logToUI(message, level = 'info') {
+  console.log(`[OpenWrt] ${message}`);
+  if (broadcastFn) {
+    broadcastFn({ type: 'log', data: { source: 'OpenWrt', message, level } });
+  }
+}
+
 function getState() {
   return state;
 }
@@ -45,7 +52,7 @@ function getConnections() {
 
 // Handle agent WebSocket connection
 function handleAgentConnection(ws) {
-  console.log('[openwrt] Agent connected');
+  logToUI('Agent connected');
 
   let agentId = null;
 
@@ -60,12 +67,12 @@ function handleAgentConnection(ws) {
         updateRouterStatus(agentId, true, data);
       }
     } catch (err) {
-      console.error('[openwrt] Error handling agent message:', err);
+      logToUI(`Error handling agent message: ${err.message}`, 'error');
     }
   });
 
   ws.on('close', () => {
-    console.log('[openwrt] Agent disconnected:', agentId);
+    logToUI(`Agent disconnected: ${agentId}`, 'warning');
     if (agentId) {
       agents.delete(agentId);
       updateRouterStatus(agentId, false);
@@ -73,7 +80,7 @@ function handleAgentConnection(ws) {
   });
 
   ws.on('error', (err) => {
-    console.error('[openwrt] Agent WebSocket error:', err);
+    logToUI(`Agent WebSocket error: ${err.message}`, 'error');
     if (agentId) {
       agents.delete(agentId);
       updateRouterStatus(agentId, false);
@@ -87,7 +94,7 @@ async function handleAgentMessage(ws, data) {
 
   switch (type) {
     case 'identify':
-      console.log(`[openwrt] Agent identified: ${data.router}`);
+      logToUI(`Agent identified: ${data.router} (${data.name || 'unnamed'})`);
       break;
 
     case 'stats':
@@ -182,20 +189,29 @@ async function handleConntrackMessage(routerId, events) {
     if (event.action === 'DESTROY') {
       connectionMap.delete(key);
     } else {
-      // Enrich destination IP with GeoIP data
-      let enriched = null;
-      if (event.dst_ip && !isPrivateIP(event.dst_ip)) {
+      const existing = connectionMap.get(key);
+
+      // Enrich destination IP with GeoIP data (only if not already enriched)
+      let enriched = existing?.enriched || null;
+      if (!enriched && event.dst_ip && !isPrivateIP(event.dst_ip)) {
         enriched = await geoip.lookup(event.dst_ip);
       }
 
       // Find source device MAC from our device list
       const srcDevice = Array.from(deviceMap.values()).find(d => d.ip === event.src_ip);
 
+      // Merge with existing connection data, keeping highest byte count
+      const bytes = Math.max(event.bytes || 0, existing?.bytes || 0);
+      const packets = Math.max(event.packets || 0, existing?.packets || 0);
+
       connectionMap.set(key, {
+        ...existing,
         ...event,
+        bytes,
+        packets,
         router: routerId,
-        srcMac: srcDevice?.mac || null,
-        srcHostname: srcDevice?.hostname || null,
+        srcMac: srcDevice?.mac || existing?.srcMac || null,
+        srcHostname: srcDevice?.hostname || existing?.srcHostname || null,
         enriched,
         lastSeen: Date.now()
       });

@@ -12,6 +12,7 @@ import { Hue } from './Hue.js';
 import { Nanoleaf } from './Nanoleaf.js';
 import { Log } from './Log.js';
 import { NetworkPage } from './NetworkPage.js';
+import { OutsidePage } from './OutsidePage.js';
 import { loadPanelNames, addLog, currentPage } from '../state.js';
 import { initWebSocket } from '../websocket-preact.js';
 
@@ -79,6 +80,7 @@ export function App() {
     <${Layout}>
       ${page === 'home' && html`<${HomePage} />`}
       ${page === 'network' && html`<${NetworkPage} />`}
+      ${page === 'outside' && html`<${OutsidePage} />`}
     <//>
   `;
 }

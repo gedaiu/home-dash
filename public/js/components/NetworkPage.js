@@ -40,19 +40,6 @@ export function NetworkPage() {
 
   return html`
     <div class="network-page">
-      <div class="network-header">
-        <h2 class="network-title">
-          <i data-lucide="network"></i>
-          NETWORK MONITOR
-        </h2>
-        <div class="network-status">
-          ${hasData
-            ? html`<span class="status-badge online">Connected</span>`
-            : html`<span class="status-badge offline">No routers connected</span>`
-          }
-        </div>
-      </div>
-
       ${!hasData && html`
         <div class="network-setup">
           <div class="setup-card">
@@ -83,15 +70,9 @@ export function NetworkPage() {
 
       ${hasData && html`
         <div class="network-grid">
-          <section class="panel network-graph-panel">
-            <div class="panel-header">
-              <i data-lucide="share-2"></i>
-              <span>CONNECTION GRAPH</span>
-            </div>
-            <div class="panel-content graph-panel-content">
-              <${ConnectionGraph} />
-            </div>
-          </section>
+          <div class="network-graph-panel">
+            <${ConnectionGraph} />
+          </div>
 
           <div class="network-sidebar">
             ${routers.map(router => html`

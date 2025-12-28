@@ -1,7 +1,7 @@
 import { html } from 'https://esm.sh/htm@3.1.1/preact';
 import { useState, useEffect, useRef } from 'https://esm.sh/preact@10.19.3/hooks';
 import { effect } from 'https://esm.sh/@preact/signals@1.2.1';
-import { logs, wsConnected, wsLatency, currentPage } from '../state.js';
+import { logs, wsConnected, wsLatency, currentPage, navigateTo } from '../state.js';
 
 function Clock() {
   const [time, setTime] = useState('00:00:00');
@@ -204,7 +204,7 @@ function NavTabs() {
   }, []);
 
   const handleTabClick = (newPage) => {
-    currentPage.value = newPage;
+    navigateTo(newPage);
   };
 
   return html`
@@ -222,6 +222,13 @@ function NavTabs() {
       >
         <i data-lucide="network"></i>
         <span>Network</span>
+      </button>
+      <button
+        class="nav-tab ${page === 'outside' ? 'active' : ''}"
+        onClick=${() => handleTabClick('outside')}
+      >
+        <i data-lucide="sun"></i>
+        <span>Outside</span>
       </button>
     </nav>
   `;

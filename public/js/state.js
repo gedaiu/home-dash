@@ -14,7 +14,26 @@ export const logs = signal([]);
 export const panelNames = signal({});
 export const wsConnected = signal(false);
 export const wsLatency = signal(null);
-export const currentPage = signal('home');
+
+// Read initial page from URL hash
+function getPageFromHash() {
+  const hash = window.location.hash.slice(1);
+  const validPages = ['home', 'network', 'outside'];
+  return validPages.includes(hash) ? hash : 'home';
+}
+
+export const currentPage = signal(getPageFromHash());
+
+// Navigate to a page and update URL
+export function navigateTo(page) {
+  currentPage.value = page;
+  window.history.pushState(null, '', `#${page}`);
+}
+
+// Handle browser back/forward
+window.addEventListener('popstate', () => {
+  currentPage.value = getPageFromHash();
+});
 
 // OpenWrt states
 export const openwrtState = signal({
@@ -24,6 +43,10 @@ export const openwrtState = signal({
 });
 
 export const selectedDeviceMac = signal(null);
+
+// Outside page states
+export const weatherState = signal(null);
+export const transportState = signal(null);
 
 // Log management
 export function addLog(message, type = '') {

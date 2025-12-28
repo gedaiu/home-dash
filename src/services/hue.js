@@ -433,6 +433,13 @@ function broadcast(type, data) {
   }
 }
 
+function logToUI(message, level = 'info') {
+  console.log(`[Hue] ${message}`);
+  if (broadcastFn) {
+    broadcastFn({ type: 'log', data: { source: 'Hue', message, level } });
+  }
+}
+
 function lightStateChanged(prev, curr) {
   if (!prev) {
     return true;
@@ -483,8 +490,8 @@ async function pollRooms() {
     const rooms = await getRooms();
     trackLightChanges(rooms);
     broadcast('rooms', rooms);
-  } catch {
-    // Ignore polling errors
+  } catch (err) {
+    logToUI(`Poll error: ${err.message}`, 'error');
   }
 }
 
@@ -493,6 +500,7 @@ function startPolling() {
     return;
   }
 
+  logToUI('Starting polling (every 5s)');
   pollTimer = setInterval(pollRooms, POLL_INTERVAL_MS);
   pollRooms();
 }

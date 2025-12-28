@@ -5,6 +5,8 @@ import {
   roomsState,
   syncState,
   openwrtState,
+  weatherState,
+  transportState,
   wsConnected,
   wsLatency,
   addLog
@@ -85,6 +87,21 @@ function handleMessage(msg) {
 
     case 'openwrt:state':
       openwrtState.value = msg.data;
+      break;
+
+    case 'weather':
+      weatherState.value = msg.data;
+      break;
+
+    case 'transport':
+      transportState.value = msg.data;
+      break;
+
+    case 'log':
+      if (msg.data) {
+        const prefix = msg.data.source ? `[${msg.data.source}] ` : '';
+        addLog(`${prefix}${msg.data.message}`, msg.data.level || '');
+      }
       break;
   }
 }

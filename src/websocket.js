@@ -6,6 +6,8 @@ const homeconnectService = require('./services/homeconnect');
 const roombaService = require('./services/roomba');
 const airpurifierService = require('./services/airpurifier');
 const openwrtService = require('./services/openwrt');
+const weatherService = require('./services/weather');
+const transportService = require('./services/transport');
 const storage = require('./services/storage');
 
 let wss = null;
@@ -37,9 +39,13 @@ function init(server) {
   roombaService.setBroadcast(broadcast);
   airpurifierService.setBroadcast(broadcast);
   openwrtService.setBroadcast(broadcast);
+  weatherService.setBroadcast(broadcast);
+  transportService.setBroadcast(broadcast);
   hueService.startPolling();
   homeconnectService.startPolling();
   roombaService.startPolling();
+  weatherService.startPolling();
+  transportService.startPolling();
 
   storage.onConfigChange(handleConfigChange);
   storage.startWatching();
@@ -70,6 +76,24 @@ function handleClientConnection(ws) {
     }));
   }
 
+  // Send current weather state
+  const weatherState = weatherService.getStatus();
+  if (weatherState) {
+    ws.send(JSON.stringify({
+      type: 'weather',
+      data: weatherState
+    }));
+  }
+
+  // Send current transport state
+  const transportState = transportService.getStatus();
+  if (transportState) {
+    ws.send(JSON.stringify({
+      type: 'transport',
+      data: transportState
+    }));
+  }
+
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message);
@@ -95,11 +119,15 @@ function handleConfigChange(config) {
   homeconnectService.stopPolling();
   roombaService.stopPolling();
   airpurifierService.stopAllPolling();
+  weatherService.stopPolling();
+  transportService.stopPolling();
 
   hueService.startPolling();
   homeconnectService.startPolling();
   roombaService.startPolling();
   airpurifierService.startAllPolling();
+  weatherService.startPolling();
+  transportService.startPolling();
 
   broadcast({
     type: 'config_changed',
@@ -141,6 +169,8 @@ function close() {
   homeconnectService.stopPolling();
   roombaService.stopPolling();
   airpurifierService.stopAllPolling();
+  weatherService.stopPolling();
+  transportService.stopPolling();
   storage.stopWatching();
 
   for (const client of clients) {

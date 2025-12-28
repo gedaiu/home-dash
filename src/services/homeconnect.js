@@ -90,6 +90,7 @@ async function refreshTokens() {
     throw new Error('No refresh token available');
   }
 
+  logToUI('Refreshing access token...');
   const params = new URLSearchParams({
     client_secret: config.clientSecret,
     grant_type: 'refresh_token',
@@ -104,6 +105,7 @@ async function refreshTokens() {
 
   if (!response.ok) {
     storage.setHomeConnectTokens(null);
+    logToUI('Token refresh failed - re-authentication required', 'error');
     throw new Error('Token refresh failed - re-authentication required');
   }
 
@@ -115,6 +117,7 @@ async function refreshTokens() {
     timestamp: Date.now()
   });
 
+  logToUI('Token refreshed successfully');
   return newTokens;
 }
 
@@ -136,7 +139,7 @@ async function getAccessToken() {
 async function apiRequest(path, options = {}) {
   const accessToken = await getAccessToken();
 
-  console.log('[HomeConnect] API request:', path);
+  logToUI(`API request: ${path}`);
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
@@ -149,10 +152,10 @@ async function apiRequest(path, options = {}) {
   if (!response.ok) {
     if (response.status === 429) {
       rateLimitedUntil = Date.now() + RATE_LIMIT_PAUSE_MS;
-      console.error('[HomeConnect] Rate limited, pausing for 1 hour');
+      logToUI('Rate limited, pausing for 1 hour', 'error');
     }
     const error = await response.text();
-    console.error('[HomeConnect] API error:', response.status, error);
+    logToUI(`API error: ${response.status} ${error}`, 'error');
     throw new Error(`API request failed: ${response.status} ${error}`);
   }
 
@@ -371,18 +374,31 @@ function broadcast(type, data) {
   }
 }
 
+function logToUI(message, level = 'info') {
+  console.log(`[HomeConnect] ${message}`);
+  if (broadcastFn) {
+    broadcastFn({ type: 'log', data: { source: 'HomeConnect', message, level } });
+  }
+}
+
 async function pollAppliances() {
   if (Date.now() < rateLimitedUntil) {
+    const remainingMs = rateLimitedUntil - Date.now();
+    const remainingMin = Math.ceil(remainingMs / 60000);
+    logToUI(`Rate limited, ${remainingMin}m remaining`, 'warning');
     return;
   }
 
   try {
+    logToUI('Polling appliances...');
     const statuses = await getAllStatuses(true);
     if (statuses.length > 0) {
+      const runningCount = statuses.filter(s => s.status?.operationState === 'running').length;
+      logToUI(`Fetched ${statuses.length} appliances, ${runningCount} running`);
       broadcast('homeconnect', statuses);
     }
-  } catch {
-    // Ignore polling errors
+  } catch (err) {
+    logToUI(`Poll error: ${err.message}`, 'error');
   }
 }
 
@@ -429,9 +445,29 @@ function updateProgressLocally() {
   });
 
   if (updated) {
-    console.log('[HomeConnect] Local progress update (no API call)');
+    const runningAppliances = updatedStatuses.filter(a => a.status?.operationState === 'running');
+    for (const appliance of runningAppliances) {
+      const prog = appliance.status?.program;
+      if (prog) {
+        const remaining = prog.remainingTime ? formatTime(prog.remainingTime) : '?';
+        const progress = prog.progress !== null ? `${prog.progress}%` : '?';
+        logToUI(`${appliance.name}: ${progress}, ${remaining} remaining`);
+      }
+    }
     broadcast('homeconnect', updatedStatuses);
   }
+}
+
+function formatTime(seconds) {
+  if (seconds === null || seconds === undefined) {
+    return '?';
+  }
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) {
+    return `${h}h ${m}m`;
+  }
+  return `${m}m`;
 }
 
 function startProgressTimer() {
@@ -458,6 +494,7 @@ function startPolling() {
     return;
   }
 
+  logToUI('Starting polling (every 20 min)');
   pollTimer = setInterval(pollAppliances, POLL_INTERVAL_MS);
   pollAppliances();
   startProgressTimer();

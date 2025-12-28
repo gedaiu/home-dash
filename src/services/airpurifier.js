@@ -141,6 +141,15 @@ function broadcast(type, data) {
   }
 }
 
+function logToUI(index, message, level = 'info') {
+  const config = getConfig(index);
+  const name = config?.name || `Purifier ${index + 1}`;
+  console.log(`[AirPurifier] ${name}: ${message}`);
+  if (broadcastFn) {
+    broadcastFn({ type: 'log', data: { source: 'AirPurifier', message: `${name}: ${message}`, level } });
+  }
+}
+
 function getDeviceState(index) {
   if (!devices.has(index)) {
     devices.set(index, {
@@ -344,12 +353,15 @@ async function startObserving(index) {
             state.status = philipsCoap.parseStatus(data);
             state.lastUpdate = new Date().toISOString();
             log(index, `Status: pwr=${state.status.pwr}, pm25=${state.status.pm25}, iaql=${state.status.iaql}, mode=${state.status.mode}, model=${state.status.model}`);
+            const pwrLabel = state.status.pwr === '1' ? 'ON' : 'OFF';
+            logToUI(index, `${pwrLabel}, PM2.5: ${state.status.pm25}, AQI: ${state.status.iaql}`);
             updatePm25History(index, state.status.pm25);
             broadcast('airpurifier', { index, ...getStatus(index) });
             broadcast('pm25_sensors', getAllPm25Sensors());
           }
         } catch (err) {
           logError(index, 'Decrypt error:', err);
+          logToUI(index, `Decrypt error: ${err.message}`, 'error');
         }
       }
     },
@@ -527,10 +539,12 @@ async function startPolling(index) {
 
   const config = getConfig(index);
   log(index, `Starting polling for ${config.name || config.ip}...`);
+  logToUI(index, 'Connecting...');
 
   const restored = await tryRestoreSession(index);
   if (restored) {
     log(index, 'Polling started successfully (restored session)');
+    logToUI(index, 'Connected (restored session)');
     return;
   }
 
@@ -538,8 +552,10 @@ async function startPolling(index) {
     await connect(index);
     await startObserving(index);
     log(index, 'Polling started successfully');
+    logToUI(index, 'Connected');
   } catch (err) {
     logError(index, 'Failed to start polling:', err);
+    logToUI(index, `Connection failed: ${err.message}`, 'error');
     broadcast('error', { service: `Air Purifier ${index + 1}`, message: err.message });
   }
 }
