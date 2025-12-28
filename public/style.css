@@ -614,14 +614,19 @@ body {
   margin-top: 2px;
 }
 
+.motion-detections-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
 .motion-detections {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
   font-size: 12px;
   color: var(--text-dim);
-  max-height: 40px;
-  overflow: hidden;
 }
 
 .motion-detections span {
@@ -928,6 +933,13 @@ select optgroup {
 
 .footer .ekg-monitor {
   margin-left: auto;
+}
+
+.footer-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
 }
 
 .footer-time {
@@ -1741,12 +1753,13 @@ select optgroup {
 .network-graph-panel {
   display: flex;
   flex-direction: column;
+  min-height: 600px;
 }
 
 .network-graph-panel .panel-content {
   flex: 1;
   padding: 0;
-  min-height: 400px;
+  min-height: 550px;
 }
 
 .graph-container {
@@ -1763,40 +1776,36 @@ select optgroup {
   gap: 16px;
 }
 
-.router-card {
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  margin-bottom: 8px;
-}
-
-.router-card.online {
-  border-color: var(--success);
-}
-
-.router-card.offline {
-  opacity: 0.6;
-}
-
-.router-header {
+.router-panel .panel-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  gap: 8px;
 }
 
-.router-name {
-  font-size: 14px;
-  color: var(--text-bright);
+.router-panel .panel-header .router-status {
+  margin-left: auto;
 }
 
-.router-role {
-  font-size: 10px;
-  padding: 2px 6px;
-  background: var(--border);
-  border-radius: 2px;
-  color: var(--text-dim);
+.router-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
   text-transform: uppercase;
+  font-weight: bold;
+}
+
+.router-status.online {
+  background: rgba(0, 255, 100, 0.15);
+  color: var(--success);
+}
+
+.router-status.offline {
+  background: rgba(255, 100, 100, 0.15);
+  color: var(--error);
+}
+
+.router-panel .info-grid {
+  margin-bottom: 12px;
 }
 
 .router-stats {
@@ -1820,8 +1829,16 @@ select optgroup {
   color: var(--text);
 }
 
+.devices-panel {
+  flex: 1;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+}
+
 .device-list-panel {
-  max-height: 300px;
+  flex: 1;
+  max-height: 400px;
   overflow-y: auto;
 }
 
@@ -1829,8 +1846,30 @@ select optgroup {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 0;
+  padding: 8px 6px;
   border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  border-radius: 3px;
+  margin: 2px 0;
+}
+
+.device-row:hover {
+  background: rgba(255, 140, 0, 0.1);
+}
+
+.device-row.selected {
+  background: rgba(0, 255, 136, 0.15);
+  border-color: rgba(0, 255, 136, 0.3);
+}
+
+.device-row.selected .device-name {
+  color: #00ff88;
+}
+
+.device-row.selected .device-indicator {
+  background: #00ff88;
+  box-shadow: 0 0 8px #00ff88;
 }
 
 .device-row:last-child {
@@ -1838,10 +1877,11 @@ select optgroup {
 }
 
 .device-indicator {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--text-dim);
+  flex-shrink: 0;
 }
 
 .device-row.online .device-indicator {
@@ -1883,20 +1923,20 @@ select optgroup {
 .graph-panel-content {
   padding: 0;
   height: 100%;
-  min-height: 400px;
+  min-height: 550px;
 }
 
 .connection-graph-container {
   position: relative;
   width: 100%;
   height: 100%;
-  min-height: 400px;
+  min-height: 550px;
 }
 
 .graph-wrapper {
   width: 100%;
   height: 100%;
-  min-height: 400px;
+  min-height: 550px;
   background: linear-gradient(
     135deg,
     rgba(15, 15, 15, 0.95) 0%,
@@ -1916,7 +1956,7 @@ select optgroup {
   align-items: center;
   justify-content: center;
   height: 100%;
-  min-height: 400px;
+  min-height: 550px;
   color: var(--text-dim);
   gap: 12px;
 }
@@ -2006,4 +2046,47 @@ select optgroup {
 
 .detail-row .value.offline {
   color: var(--text-dim);
+}
+
+.detail-section {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.detail-section-title {
+  font-size: 11px;
+  font-weight: bold;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+.destination-row {
+  padding: 3px 0;
+}
+
+.dest-name {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dest-country {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 4px;
+  background: rgba(255, 140, 0, 0.2);
+  border-radius: 2px;
+  color: var(--accent);
+  margin-right: 4px;
+}
+
+.dest-bytes {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: monospace;
 }

@@ -1,0 +1,23 @@
+# OpenWrt Network Monitor Agent Configuration
+# Copy this file to /etc/netmon/config.yaml on your router
+
+# Server connection
+server_url: "ws://192.168.1.100:3000/ws/agent"
+
+# Router identification
+router_id: "main"
+router_name: "Main Router"
+
+# Role: "main" for primary router, "ap" for access point
+# AP mode uses lighter resource settings by default
+role: "main"
+
+# Performance tuning (optional - defaults are set based on role)
+# batch_interval: 100      # ms between message batches (main: 100, ap: 500)
+# stats_interval: 10000    # ms between stats updates (main: 10000, ap: 30000)
+# max_connections: 1000    # max tracked connections (main: 1000, ap: 100)
+
+# Feature toggles (main router defaults to all enabled)
+# conntrack_enabled: true  # Stream connection tracking events
+# traffic_enabled: true    # Poll traffic statistics from nlbwmon
+# device_enabled: true     # Track device presence

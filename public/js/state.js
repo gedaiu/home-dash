@@ -23,6 +23,8 @@ export const openwrtState = signal({
   connections: []
 });
 
+export const selectedDeviceMac = signal(null);
+
 // Log management
 export function addLog(message, type = '') {
   const time = new Date().toLocaleTimeString();

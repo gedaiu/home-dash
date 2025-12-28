@@ -51,6 +51,8 @@ export function Nanoleaf() {
     `;
   }
 
+  const ipDisplay = device.port ? `${device.ip}:${device.port}` : device.ip;
+
   return html`
     <${Panel} panelKey="nanoleaf" defaultName="NANOLEAF" icon="triangle">
       <div class="device-info">
@@ -58,10 +60,12 @@ export function Nanoleaf() {
           <span class="label">STATUS:</span>
           <${StatusBadge} status="CONNECTED" className="online" />
         </div>
-        <div class="info-row">
-          <span class="label">IP:</span>
-          <span class="value">${device.ip}:${device.port}</span>
-        </div>
+        ${device.ip ? html`
+          <div class="info-row">
+            <span class="label">IP:</span>
+            <span class="value">${ipDisplay}</span>
+          </div>
+        ` : null}
         ${device.name ? html`
           <div class="info-row">
             <span class="label">NAME:</span>

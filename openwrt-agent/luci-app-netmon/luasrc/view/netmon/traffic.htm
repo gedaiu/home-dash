@@ -1,0 +1,151 @@
+<%#
+Copyright (C) 2024 Network Monitor
+Licensed under the Apache License, Version 2.0
+-%>
+
+<%+header%>
+
+<style>
+.traffic-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+}
+
+.traffic-table th,
+.traffic-table td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+.traffic-table th {
+    background: #f5f5f5;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.traffic-table th:hover {
+    background: #eee;
+}
+
+.traffic-table tr:hover {
+    background: #f9f9f9;
+}
+
+.bytes-value {
+    font-family: monospace;
+    text-align: right;
+}
+
+.sort-icon {
+    margin-left: 5px;
+    opacity: 0.5;
+}
+
+.sort-icon.active {
+    opacity: 1;
+}
+
+.refresh-btn {
+    margin: 10px 0;
+}
+
+.loading {
+    text-align: center;
+    padding: 40px;
+    color: #666;
+}
+</style>
+
+<h2><%:Traffic Statistics%></h2>
+<p><%:Per-device bandwidth usage from nlbwmon. Click column headers to sort.%></p>
+
+<button class="cbi-button cbi-button-apply refresh-btn" onclick="refreshTraffic()">
+    <%:Refresh%>
+</button>
+
+<div id="traffic-container">
+    <div class="loading"><%:Loading traffic data...%></div>
+</div>
+
+<script>
+(function() {
+    var sortColumn = 'rx_bytes';
+    var sortAsc = false;
+    var trafficData = [];
+
+    function formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        var k = 1024;
+        var sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        var i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    function renderTable() {
+        var container = document.getElementById('traffic-container');
+
+        if (!trafficData || trafficData.length === 0) {
+            container.innerHTML = '<div class="loading"><%:No traffic data available. Make sure nlbwmon is installed and running.%></div>';
+            return;
+        }
+
+        var sorted = trafficData.slice().sort(function(a, b) {
+            var valA = a[sortColumn] || 0;
+            var valB = b[sortColumn] || 0;
+            return sortAsc ? valA - valB : valB - valA;
+        });
+
+        var html = '<table class="traffic-table">';
+        html += '<thead><tr>';
+        html += '<th onclick="sortBy(\'mac\')"><%:MAC Address%> <span class="sort-icon' + (sortColumn === 'mac' ? ' active' : '') + '">&#x25B2;&#x25BC;</span></th>';
+        html += '<th onclick="sortBy(\'ip\')"><%:IP Address%> <span class="sort-icon' + (sortColumn === 'ip' ? ' active' : '') + '">&#x25B2;&#x25BC;</span></th>';
+        html += '<th onclick="sortBy(\'rx_bytes\')"><%:Download%> <span class="sort-icon' + (sortColumn === 'rx_bytes' ? ' active' : '') + '">&#x25B2;&#x25BC;</span></th>';
+        html += '<th onclick="sortBy(\'tx_bytes\')"><%:Upload%> <span class="sort-icon' + (sortColumn === 'tx_bytes' ? ' active' : '') + '">&#x25B2;&#x25BC;</span></th>';
+        html += '<th onclick="sortBy(\'total\')"><%:Total%> <span class="sort-icon' + (sortColumn === 'total' ? ' active' : '') + '">&#x25B2;&#x25BC;</span></th>';
+        html += '</tr></thead><tbody>';
+
+        sorted.forEach(function(row) {
+            var total = (row.rx_bytes || 0) + (row.tx_bytes || 0);
+            html += '<tr>';
+            html += '<td>' + (row.mac || '-') + '</td>';
+            html += '<td>' + (row.ip || '-') + '</td>';
+            html += '<td class="bytes-value">' + formatBytes(row.rx_bytes || 0) + '</td>';
+            html += '<td class="bytes-value">' + formatBytes(row.tx_bytes || 0) + '</td>';
+            html += '<td class="bytes-value">' + formatBytes(total) + '</td>';
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    window.sortBy = function(column) {
+        if (sortColumn === column) {
+            sortAsc = !sortAsc;
+        } else {
+            sortColumn = column;
+            sortAsc = false;
+        }
+        renderTable();
+    };
+
+    window.refreshTraffic = function() {
+        document.getElementById('traffic-container').innerHTML = '<div class="loading"><%:Loading...%></div>';
+        loadTraffic();
+    };
+
+    function loadTraffic() {
+        XHR.get('<%=luci.dispatcher.build_url("admin/services/netmon/api/traffic")%>', null, function(x, data) {
+            trafficData = data || [];
+            renderTable();
+        });
+    }
+
+    loadTraffic();
+    setInterval(loadTraffic, 10000);
+})();
+</script>
+
+<%+footer%>

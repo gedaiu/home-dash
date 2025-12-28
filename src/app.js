@@ -7,6 +7,7 @@ const homeconnectRoutes = require('./routes/homeconnect');
 const roombaRoutes = require('./routes/roomba');
 const airpurifierRoutes = require('./routes/airpurifier');
 const panelsRoutes = require('./routes/panels');
+const openwrtRoutes = require('./routes/openwrt');
 
 const app = express();
 
@@ -20,6 +21,7 @@ app.use('/api/homeconnect', homeconnectRoutes);
 app.use('/api/roomba', roombaRoutes);
 app.use('/api/airpurifier', airpurifierRoutes);
 app.use('/api/panels', panelsRoutes);
+app.use('/api/openwrt', openwrtRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err.stack);

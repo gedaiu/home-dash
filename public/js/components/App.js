@@ -4,6 +4,7 @@ import { effect } from 'https://esm.sh/@preact/signals@1.2.1';
 import { Layout } from './Layout.js';
 import { Roomba } from './Roomba.js';
 import { AirPurifiers } from './AirPurifier.js';
+import { HomeConnect } from './HomeConnect.js';
 import { Sensors } from './Sensors.js';
 import { Rooms } from './Rooms.js';
 import { SyncControl } from './SyncControl.js';
@@ -19,6 +20,7 @@ function HomePage() {
     <div class="panel-row" id="devices-row">
       <${Roomba} />
       <${AirPurifiers} />
+      <${HomeConnect} />
     </div>
 
     <div class="crt-divider"></div>

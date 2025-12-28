@@ -442,6 +442,39 @@ function deletePanelName(key) {
   fs.writeFileSync(PANEL_NAMES_FILE, JSON.stringify(names, null, 2), 'utf-8');
 }
 
+const COAP_STATE_FILE = path.join(DATA_DIR, 'coap-state.json');
+
+function getCoapState() {
+  ensureDataDir();
+  if (!fs.existsSync(COAP_STATE_FILE)) {
+    return {};
+  }
+  try {
+    return JSON.parse(fs.readFileSync(COAP_STATE_FILE, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function setCoapState(state) {
+  ensureDataDir();
+  fs.writeFileSync(COAP_STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
+}
+
+function getAirPurifierCounter(index) {
+  const state = getCoapState();
+  return state[`airpurifier_${index}`]?.counter || null;
+}
+
+function setAirPurifierCounter(index, counter) {
+  const state = getCoapState();
+  state[`airpurifier_${index}`] = {
+    counter,
+    timestamp: Date.now()
+  };
+  setCoapState(state);
+}
+
 module.exports = {
   load,
   save,
@@ -477,5 +510,7 @@ module.exports = {
   stopWatching,
   getPanelNames,
   setPanelName,
-  deletePanelName
+  deletePanelName,
+  getAirPurifierCounter,
+  setAirPurifierCounter
 };

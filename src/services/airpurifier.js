@@ -194,34 +194,100 @@ async function getDeviceInfo(index) {
   return null;
 }
 
+async function syncOnce(index) {
+  const baseUrl = getBaseUrl(index);
+  const state = getDeviceState(index);
+
+  coap.stopObserving(`${baseUrl}/sys/dev/status`);
+  coap.reset(baseUrl);
+
+  const token = crypto.randomBytes(4).toString('hex').toUpperCase();
+
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Sync timeout')), 60000);
+  });
+
+  const requestPromise = coap.request(`${baseUrl}/sys/dev/sync`, 'post',
+    Buffer.from(token, 'utf-8'),
+    { keepAlive: true, confirmable: true, retransmit: true }
+  );
+
+  const response = await Promise.race([requestPromise, timeoutPromise]);
+
+  if (response.payload) {
+    state.counter = response.payload.toString('utf-8');
+    state.connected = true;
+    storage.setAirPurifierCounter(index, state.counter);
+    log(index, `Sync successful, counter: ${state.counter}`);
+    return state.counter;
+  }
+
+  throw new Error('Sync failed - no counter received');
+}
+
+async function tryRestoreSession(index) {
+  const savedCounter = storage.getAirPurifierCounter(index);
+  if (!savedCounter) {
+    return false;
+  }
+
+  const baseUrl = getBaseUrl(index);
+  const state = getDeviceState(index);
+  const config = getConfig(index);
+
+  log(index, `Trying to restore session with saved counter: ${savedCounter}`);
+
+  try {
+    state.counter = savedCounter;
+    state.connected = true;
+
+    await startObserving(index);
+
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    if (state.status && state.lastUpdate) {
+      log(index, `Session restored successfully for ${config.ip}`);
+      return true;
+    }
+
+    log(index, 'Session restore failed - no status received, will do full sync');
+    state.connected = false;
+    state.counter = null;
+    coap.stopObserving(`${baseUrl}/sys/dev/status`);
+    return false;
+  } catch (err) {
+    logError(index, 'Session restore failed:', err);
+    state.connected = false;
+    state.counter = null;
+    return false;
+  }
+}
+
 async function sync(index) {
   const baseUrl = getBaseUrl(index);
   if (!baseUrl) {
     throw new Error('Air purifier not configured');
   }
 
-  const state = getDeviceState(index);
   const config = getConfig(index);
+  let attempt = 0;
 
-  log(index, `Syncing with device at ${config.ip}...`);
+  while (true) {
+    attempt++;
+    log(index, `Syncing with device at ${config.ip}... (attempt ${attempt})`);
 
-  coap.stopObserving(`${baseUrl}/sys/dev/status`);
-  coap.reset(baseUrl);
+    try {
+      return await syncOnce(index);
+    } catch (err) {
+      logError(index, `Sync attempt ${attempt} failed:`, err);
 
-  const token = crypto.randomBytes(4).toString('hex').toUpperCase();
-  const response = await coap.request(`${baseUrl}/sys/dev/sync`, 'post',
-    Buffer.from(token, 'utf-8'),
-    { keepAlive: true, confirmable: true, retransmit: true }
-  );
+      const delay = Math.min(1000 * Math.pow(2, Math.min(attempt - 1, 5)), 30000);
+      log(index, `Retrying in ${delay / 1000}s...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
 
-  if (response.payload) {
-    state.counter = response.payload.toString('utf-8');
-    state.connected = true;
-    log(index, `Sync successful, counter: ${state.counter}`);
-    return state.counter;
+      coap.reset(baseUrl);
+    }
   }
-
-  throw new Error('Sync failed - no counter received');
 }
 
 async function connect(index) {
@@ -461,6 +527,12 @@ async function startPolling(index) {
 
   const config = getConfig(index);
   log(index, `Starting polling for ${config.name || config.ip}...`);
+
+  const restored = await tryRestoreSession(index);
+  if (restored) {
+    log(index, 'Polling started successfully (restored session)');
+    return;
+  }
 
   try {
     await connect(index);

@@ -1,0 +1,74 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2024 Network Monitor
+# Licensed under the Apache License, Version 2.0
+
+START=95
+STOP=10
+USE_PROCD=1
+
+PROG=/usr/bin/netmon-agent
+CONFIG_FILE=/tmp/netmon-config.yaml
+
+generate_config() {
+    local enabled server_url router_id router_name role
+    local batch_interval stats_interval conntrack_enabled traffic_enabled max_connections
+
+    config_load netmon
+    config_get enabled main enabled "1"
+    config_get server_url main server_url ""
+    config_get router_id main router_id "router"
+    config_get router_name main router_name "Router"
+    config_get role main role "main"
+    config_get batch_interval main batch_interval "100"
+    config_get stats_interval main stats_interval "10000"
+    config_get conntrack_enabled main conntrack_enabled "1"
+    config_get traffic_enabled main traffic_enabled "1"
+    config_get max_connections main max_connections "1000"
+
+    # Don't start if disabled or no server URL
+    [ "$enabled" = "0" ] && return 1
+    [ -z "$server_url" ] && {
+        logger -t netmon "No server URL configured, not starting"
+        return 1
+    }
+
+    # Generate YAML config
+    cat > "$CONFIG_FILE" << EOF
+server_url: "$server_url"
+router_id: "$router_id"
+router_name: "$router_name"
+role: "$role"
+batch_interval: $batch_interval
+stats_interval: $stats_interval
+conntrack_enabled: $([ "$conntrack_enabled" = "1" ] && echo "true" || echo "false")
+traffic_enabled: $([ "$traffic_enabled" = "1" ] && echo "true" || echo "false")
+max_connections: $max_connections
+EOF
+
+    return 0
+}
+
+start_service() {
+    generate_config || return 0
+
+    procd_open_instance
+    procd_set_param command "$PROG" -config "$CONFIG_FILE"
+    procd_set_param respawn "${respawn_threshold:-3600}" "${respawn_timeout:-5}" "${respawn_retry:-5}"
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_set_param pidfile /var/run/netmon.pid
+    procd_close_instance
+}
+
+stop_service() {
+    rm -f "$CONFIG_FILE"
+}
+
+reload_service() {
+    stop
+    start
+}
+
+service_triggers() {
+    procd_add_reload_trigger "netmon"
+}

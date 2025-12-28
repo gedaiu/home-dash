@@ -1,0 +1,197 @@
+<%#
+Copyright (C) 2024 Network Monitor
+Licensed under the Apache License, Version 2.0
+-%>
+
+<%+header%>
+
+<style>
+.device-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 15px;
+    margin: 20px 0;
+}
+
+.device-card {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 15px;
+    transition: box-shadow 0.2s;
+}
+
+.device-card:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.device-card.online {
+    border-left: 4px solid #4CAF50;
+}
+
+.device-card.offline {
+    border-left: 4px solid #ccc;
+    opacity: 0.7;
+}
+
+.device-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+}
+
+.device-name {
+    font-weight: bold;
+    font-size: 14px;
+    color: #333;
+    word-break: break-all;
+}
+
+.device-status {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+.device-status.online {
+    background: #4CAF50;
+    color: white;
+}
+
+.device-status.offline {
+    background: #9e9e9e;
+    color: white;
+}
+
+.device-info {
+    font-size: 13px;
+    color: #666;
+}
+
+.device-info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+}
+
+.device-mac {
+    font-family: monospace;
+    font-size: 12px;
+}
+
+.signal-bars {
+    display: inline-flex;
+    gap: 2px;
+    align-items: flex-end;
+    height: 12px;
+}
+
+.signal-bar {
+    width: 3px;
+    background: #ddd;
+    border-radius: 1px;
+}
+
+.signal-bar.active {
+    background: #4CAF50;
+}
+
+.signal-bar:nth-child(1) { height: 4px; }
+.signal-bar:nth-child(2) { height: 6px; }
+.signal-bar:nth-child(3) { height: 9px; }
+.signal-bar:nth-child(4) { height: 12px; }
+
+.device-count {
+    color: #666;
+    margin: 10px 0;
+}
+
+.loading {
+    text-align: center;
+    padding: 40px;
+    color: #666;
+}
+</style>
+
+<h2><%:Connected Devices%></h2>
+<p><%:Devices detected via DHCP leases and ARP table.%></p>
+
+<div class="device-count" id="device-count"></div>
+
+<div class="device-grid" id="device-grid">
+    <div class="loading"><%:Loading devices...%></div>
+</div>
+
+<script>
+(function() {
+    function getSignalBars(signal) {
+        if (!signal) return '';
+
+        var level = 0;
+        if (signal > -50) level = 4;
+        else if (signal > -60) level = 3;
+        else if (signal > -70) level = 2;
+        else if (signal > -80) level = 1;
+
+        var html = '<div class="signal-bars" title="' + signal + ' dBm">';
+        for (var i = 1; i <= 4; i++) {
+            html += '<div class="signal-bar' + (i <= level ? ' active' : '') + '"></div>';
+        }
+        html += '</div>';
+        return html;
+    }
+
+    function renderDevices(devices) {
+        var container = document.getElementById('device-grid');
+        var countEl = document.getElementById('device-count');
+
+        if (!devices || devices.length === 0) {
+            container.innerHTML = '<div class="loading"><%:No devices detected yet.%></div>';
+            countEl.textContent = '';
+            return;
+        }
+
+        var online = devices.filter(function(d) { return d.online; }).length;
+        countEl.textContent = online + ' <%:online%> / ' + devices.length + ' <%:total devices%>';
+
+        var sorted = devices.slice().sort(function(a, b) {
+            if (a.online !== b.online) return b.online - a.online;
+            return (a.hostname || a.mac).localeCompare(b.hostname || b.mac);
+        });
+
+        var html = '';
+        sorted.forEach(function(device) {
+            var statusClass = device.online ? 'online' : 'offline';
+            var name = device.hostname || device.mac.substring(0, 8) + '...';
+
+            html += '<div class="device-card ' + statusClass + '">';
+            html += '<div class="device-header">';
+            html += '<span class="device-name">' + name + '</span>';
+            html += '<span class="device-status ' + statusClass + '">' + (device.online ? '<%:Online%>' : '<%:Offline%>') + '</span>';
+            html += '</div>';
+            html += '<div class="device-info">';
+            html += '<div class="device-info-row"><span><%:IP%></span><span>' + (device.ip || '-') + '</span></div>';
+            html += '<div class="device-info-row"><span><%:MAC%></span><span class="device-mac">' + device.mac + '</span></div>';
+            if (device.signal) {
+                html += '<div class="device-info-row"><span><%:WiFi Signal%></span>' + getSignalBars(device.signal) + '</div>';
+            }
+            html += '</div>';
+            html += '</div>';
+        });
+
+        container.innerHTML = html;
+    }
+
+    function loadDevices() {
+        XHR.get('<%=luci.dispatcher.build_url("admin/services/netmon/api/devices")%>', null, function(x, data) {
+            renderDevices(data || []);
+        });
+    }
+
+    loadDevices();
+    setInterval(loadDevices, 5000);
+})();
+</script>
+
+<%+footer%>

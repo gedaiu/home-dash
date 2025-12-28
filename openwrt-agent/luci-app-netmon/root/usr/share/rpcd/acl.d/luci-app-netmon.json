@@ -1,0 +1,28 @@
+{
+	"luci-app-netmon": {
+		"description": "Grant access for luci-app-netmon",
+		"read": {
+			"file": {
+				"/etc/config/netmon": [ "read" ],
+				"/bin/sh -c pgrep*": [ "exec" ],
+				"/bin/sh -c pgrep -f netmon-agent*": [ "exec" ],
+				"/etc/init.d/netmon restart": [ "exec" ]
+			},
+			"ubus": {
+				"file": [ "read", "exec" ],
+				"system": [ "info" ],
+				"uci": [ "get", "state" ]
+			},
+			"uci": [ "netmon" ]
+		},
+		"write": {
+			"file": {
+				"/etc/init.d/netmon restart": [ "exec" ]
+			},
+			"ubus": {
+				"file": [ "exec" ]
+			},
+			"uci": [ "netmon" ]
+		}
+	}
+}

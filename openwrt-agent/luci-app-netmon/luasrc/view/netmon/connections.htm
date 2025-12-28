@@ -1,0 +1,214 @@
+<%#
+Copyright (C) 2024 Network Monitor
+Licensed under the Apache License, Version 2.0
+-%>
+
+<%+header%>
+
+<style>
+.conn-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+    font-size: 13px;
+}
+
+.conn-table th,
+.conn-table td {
+    padding: 8px 10px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+.conn-table th {
+    background: #f5f5f5;
+    font-weight: bold;
+    position: sticky;
+    top: 0;
+}
+
+.conn-table tr:hover {
+    background: #f9f9f9;
+}
+
+.conn-container {
+    max-height: 600px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.protocol-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.protocol-tcp {
+    background: #2196F3;
+    color: white;
+}
+
+.protocol-udp {
+    background: #4CAF50;
+    color: white;
+}
+
+.protocol-icmp {
+    background: #ff9800;
+    color: white;
+}
+
+.filter-row {
+    margin: 10px 0;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.filter-input {
+    padding: 6px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    width: 200px;
+}
+
+.conn-count {
+    color: #666;
+    font-size: 14px;
+}
+
+.port-common {
+    color: #666;
+    font-size: 11px;
+}
+</style>
+
+<h2><%:Active Connections%></h2>
+<p><%:Real-time view of active network connections from conntrack.%></p>
+
+<div class="filter-row">
+    <input type="text" id="filter-input" class="filter-input" placeholder="<%:Filter by IP or port...%>" oninput="filterConnections()">
+    <button class="cbi-button cbi-button-apply" onclick="refreshConnections()"><%:Refresh%></button>
+    <span class="conn-count" id="conn-count"></span>
+</div>
+
+<div class="conn-container">
+    <table class="conn-table">
+        <thead>
+            <tr>
+                <th><%:Protocol%></th>
+                <th><%:Source IP%></th>
+                <th><%:Source Port%></th>
+                <th><%:Destination IP%></th>
+                <th><%:Destination Port%></th>
+                <th><%:Bytes%></th>
+            </tr>
+        </thead>
+        <tbody id="conn-body">
+            <tr><td colspan="6" style="text-align:center;padding:40px;"><%:Loading...%></td></tr>
+        </tbody>
+    </table>
+</div>
+
+<script>
+(function() {
+    var connections = [];
+    var filterText = '';
+
+    var commonPorts = {
+        80: 'HTTP',
+        443: 'HTTPS',
+        22: 'SSH',
+        53: 'DNS',
+        21: 'FTP',
+        25: 'SMTP',
+        110: 'POP3',
+        143: 'IMAP',
+        3306: 'MySQL',
+        5432: 'PostgreSQL',
+        6379: 'Redis',
+        8080: 'HTTP-ALT',
+        8443: 'HTTPS-ALT'
+    };
+
+    function formatBytes(bytes) {
+        if (!bytes || bytes === 0) return '-';
+        var k = 1024;
+        var sizes = ['B', 'KB', 'MB', 'GB'];
+        var i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    function getPortLabel(port) {
+        var label = commonPorts[port];
+        return label ? '<span class="port-common">(' + label + ')</span>' : '';
+    }
+
+    function renderTable() {
+        var tbody = document.getElementById('conn-body');
+        var filtered = connections;
+
+        if (filterText) {
+            var search = filterText.toLowerCase();
+            filtered = connections.filter(function(c) {
+                return (c.src_ip && c.src_ip.includes(search)) ||
+                       (c.dst_ip && c.dst_ip.includes(search)) ||
+                       (c.src_port && String(c.src_port).includes(search)) ||
+                       (c.dst_port && String(c.dst_port).includes(search)) ||
+                       (c.protocol && c.protocol.toLowerCase().includes(search));
+            });
+        }
+
+        document.getElementById('conn-count').textContent =
+            '<%:Showing%> ' + filtered.length + ' <%:of%> ' + connections.length + ' <%:connections%>';
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;"><%:No connections found%></td></tr>';
+            return;
+        }
+
+        var html = '';
+        filtered.slice(0, 200).forEach(function(c) {
+            var protoClass = 'protocol-' + (c.protocol || 'tcp').toLowerCase();
+            html += '<tr>';
+            html += '<td><span class="protocol-badge ' + protoClass + '">' + (c.protocol || 'TCP').toUpperCase() + '</span></td>';
+            html += '<td>' + (c.src_ip || '-') + '</td>';
+            html += '<td>' + (c.src_port || '-') + '</td>';
+            html += '<td>' + (c.dst_ip || '-') + '</td>';
+            html += '<td>' + (c.dst_port || '-') + ' ' + getPortLabel(c.dst_port) + '</td>';
+            html += '<td>' + formatBytes(c.bytes) + '</td>';
+            html += '</tr>';
+        });
+
+        if (filtered.length > 200) {
+            html += '<tr><td colspan="6" style="text-align:center;color:#666;"><%:...and%> ' + (filtered.length - 200) + ' <%:more%></td></tr>';
+        }
+
+        tbody.innerHTML = html;
+    }
+
+    window.filterConnections = function() {
+        filterText = document.getElementById('filter-input').value;
+        renderTable();
+    };
+
+    window.refreshConnections = function() {
+        loadConnections();
+    };
+
+    function loadConnections() {
+        XHR.get('<%=luci.dispatcher.build_url("admin/services/netmon/api/connections")%>', null, function(x, data) {
+            connections = data || [];
+            renderTable();
+        });
+    }
+
+    loadConnections();
+    setInterval(loadConnections, 3000);
+})();
+</script>
+
+<%+footer%>

@@ -39,7 +39,7 @@ export function Panel({ panelKey, defaultName, icon, children, controls }) {
         ${isEditing ? html`
           <input
             type="text"
-            class="panel-title-input"
+            class="inline-edit-input"
             value=${editValue}
             onInput=${(e) => setEditValue(e.target.value)}
             onBlur=${saveEdit}
@@ -47,7 +47,7 @@ export function Panel({ panelKey, defaultName, icon, children, controls }) {
             autoFocus
           />
         ` : html`
-          <span class="panel-title" onClick=${startEdit}>${displayName}</span>
+          <span class="panel-title editable-title" onClick=${startEdit}>${displayName}</span>
         `}
         ${controls}
       </div>

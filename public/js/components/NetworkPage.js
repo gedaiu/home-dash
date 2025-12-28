@@ -1,11 +1,12 @@
 import { html } from 'https://esm.sh/htm@3.1.1/preact';
 import { useState, useEffect } from 'https://esm.sh/preact@10.19.3/hooks';
 import { effect } from 'https://esm.sh/@preact/signals@1.2.1';
-import { openwrtState } from '../state.js';
+import { openwrtState, selectedDeviceMac } from '../state.js';
 import { ConnectionGraph } from './ConnectionGraph.js';
 
 export function NetworkPage() {
   const [state, setState] = useState(openwrtState.value);
+  const [selectedMac, setSelectedMac] = useState(null);
 
   useEffect(() => {
     const dispose = effect(() => {
@@ -14,7 +15,27 @@ export function NetworkPage() {
     return dispose;
   }, []);
 
+  useEffect(() => {
+    const dispose = effect(() => {
+      setSelectedMac(selectedDeviceMac.value);
+    });
+    return dispose;
+  }, []);
+
+  const handleDeviceClick = (device) => {
+    selectedDeviceMac.value = selectedDeviceMac.value === device.mac ? null : device.mac;
+  };
+
+  const ipToNumber = (ip) => {
+    if (!ip) {
+      return 0;
+    }
+    const parts = ip.split('.');
+    return parts.reduce((acc, part) => (acc << 8) + parseInt(part, 10), 0) >>> 0;
+  };
+
   const { routers, devices, connections } = state;
+  const sortedDevices = [...devices].sort((a, b) => ipToNumber(a.ip) - ipToNumber(b.ip));
   const hasData = routers.length > 0;
 
   return html`
@@ -73,48 +94,58 @@ export function NetworkPage() {
           </section>
 
           <div class="network-sidebar">
-            <section class="panel">
-              <div class="panel-header">
-                <i data-lucide="server"></i>
-                <span>ROUTERS</span>
-              </div>
-              <div class="panel-content">
-                ${routers.map(router => html`
-                  <div class="router-card ${router.online ? 'online' : 'offline'}">
-                    <div class="router-header">
-                      <span class="router-name">${router.name || router.id}</span>
-                      <span class="router-role">${router.role}</span>
+            ${routers.map(router => html`
+              <section class="panel router-panel">
+                <div class="panel-header">
+                  <i data-lucide="server"></i>
+                  <span>${router.name || router.id}</span>
+                  <span class="router-status ${router.online ? 'online' : 'offline'}">
+                    ${router.online ? 'Online' : 'Offline'}
+                  </span>
+                </div>
+                <div class="panel-content">
+                  <div class="info-grid">
+                    <div class="info-row">
+                      <span class="label">IP</span>
+                      <span class="value">${router.ip || '--'}</span>
                     </div>
-                    <div class="router-stats">
-                      <div class="stat">
-                        <span class="stat-label">CPU</span>
-                        <span class="stat-value">${router.cpu || '--'}%</span>
-                      </div>
-                      <div class="stat">
-                        <span class="stat-label">MEM</span>
-                        <span class="stat-value">${router.memory || '--'}%</span>
-                      </div>
-                      <div class="stat">
-                        <span class="stat-label">TEMP</span>
-                        <span class="stat-value">${router.temp || '--'}C</span>
-                      </div>
+                    <div class="info-row">
+                      <span class="label">Role</span>
+                      <span class="value">${router.role || '--'}</span>
                     </div>
                   </div>
-                `)}
-              </div>
-            </section>
+                  <div class="router-stats">
+                    <div class="stat">
+                      <span class="stat-label">CPU</span>
+                      <span class="stat-value">${router.cpu != null ? router.cpu.toFixed(1) : '--'}%</span>
+                    </div>
+                    <div class="stat">
+                      <span class="stat-label">MEM</span>
+                      <span class="stat-value">${router.memory != null ? router.memory.toFixed(1) : '--'}%</span>
+                    </div>
+                    <div class="stat">
+                      <span class="stat-label">TEMP</span>
+                      <span class="stat-value">${router.temp != null ? router.temp.toFixed(1) : '--'}C</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            `)}
 
-            <section class="panel">
+            <section class="panel devices-panel">
               <div class="panel-header">
                 <i data-lucide="smartphone"></i>
-                <span>DEVICES (${devices.filter(d => d.online).length}/${devices.length})</span>
+                <span>DEVICES (${sortedDevices.filter(d => d.online).length}/${sortedDevices.length})</span>
               </div>
               <div class="panel-content device-list-panel">
-                ${devices.length === 0 && html`
+                ${sortedDevices.length === 0 && html`
                   <div class="loading">No devices detected yet...</div>
                 `}
-                ${devices.map(device => html`
-                  <div class="device-row ${device.online ? 'online' : 'offline'}">
+                ${sortedDevices.map(device => html`
+                  <div
+                    class="device-row ${device.online ? 'online' : 'offline'} ${selectedMac === device.mac ? 'selected' : ''}"
+                    onClick=${() => handleDeviceClick(device)}
+                  >
                     <span class="device-indicator"></span>
                     <span class="device-name">${device.hostname || device.mac}</span>
                     <span class="device-ip">${device.ip}</span>

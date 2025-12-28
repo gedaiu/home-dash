@@ -64,6 +64,7 @@ function handleMessage(msg) {
       }
       break;
     case 'homeconnect':
+      console.log('HomeConnect WS message:', msg.data);
       homeConnectState.value = msg.data;
       break;
     case 'sync':

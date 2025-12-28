@@ -9,8 +9,11 @@ const RATE_LIMIT_PAUSE_MS = 60 * 60 * 1000; // 1 hour
 
 let broadcastFn = null;
 let pollTimer = null;
+let progressTimer = null;
 let cachedAppliances = [];
 let rateLimitedUntil = 0;
+
+const PROGRESS_UPDATE_INTERVAL_MS = 60 * 1000; // 1 minute
 
 function getConfig() {
   return storage.getHomeConnect() || {};
@@ -133,6 +136,7 @@ async function getAccessToken() {
 async function apiRequest(path, options = {}) {
   const accessToken = await getAccessToken();
 
+  console.log('[HomeConnect] API request:', path);
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
@@ -145,13 +149,16 @@ async function apiRequest(path, options = {}) {
   if (!response.ok) {
     if (response.status === 429) {
       rateLimitedUntil = Date.now() + RATE_LIMIT_PAUSE_MS;
-      console.error('Home Connect rate limited, pausing for 1 hour');
+      console.error('[HomeConnect] Rate limited, pausing for 1 hour');
     }
     const error = await response.text();
+    console.error('[HomeConnect] API error:', response.status, error);
     throw new Error(`API request failed: ${response.status} ${error}`);
   }
 
-  return response.json();
+  const data = await response.json();
+  console.log('[HomeConnect] API response:', path, JSON.stringify(data, null, 2));
+  return data;
 }
 
 async function getAppliances() {
@@ -268,7 +275,7 @@ async function getDishwasherStatus(haId) {
     }
   }
 
-  return {
+  const result = {
     operationState: parseOperationState(status.OperationState),
     doorState: parseDoorState(status.DoorState),
     remoteControlActive: status.RemoteControlActive || false,
@@ -284,6 +291,9 @@ async function getDishwasherStatus(haId) {
       estimatedTotalTime
     } : null
   };
+
+  console.log('[HomeConnect] Dishwasher status:', JSON.stringify(result, null, 2));
+  return result;
 }
 
 async function fetchStatusesFromApi() {
@@ -355,6 +365,7 @@ function setBroadcast(fn) {
 }
 
 function broadcast(type, data) {
+  console.log('[HomeConnect] Broadcasting:', type, JSON.stringify(data, null, 2));
   if (broadcastFn) {
     broadcastFn({ type, data });
   }
@@ -375,6 +386,69 @@ async function pollAppliances() {
   }
 }
 
+function updateProgressLocally() {
+  const cache = storage.getHomeConnectCache();
+  if (!cache.statuses || cache.statuses.length === 0) {
+    return;
+  }
+
+  const elapsedSinceCache = Math.floor((Date.now() - cache.timestamp) / 1000);
+  let updated = false;
+
+  const updatedStatuses = cache.statuses.map(appliance => {
+    if (!appliance.status?.program || appliance.status.operationState !== 'running') {
+      return appliance;
+    }
+
+    const program = appliance.status.program;
+    const newProgram = { ...program };
+
+    if (program.remainingTime !== null && program.remainingTime > 0) {
+      newProgram.remainingTime = Math.max(0, program.remainingTime - elapsedSinceCache);
+      updated = true;
+    }
+
+    if (program.elapsedTime !== null) {
+      newProgram.elapsedTime = program.elapsedTime + elapsedSinceCache;
+      updated = true;
+    }
+
+    if (program.estimatedTotalTime && program.estimatedTotalTime > 0) {
+      const newElapsed = newProgram.elapsedTime || elapsedSinceCache;
+      newProgram.progress = Math.min(100, Math.floor((newElapsed / program.estimatedTotalTime) * 100));
+      updated = true;
+    }
+
+    return {
+      ...appliance,
+      status: {
+        ...appliance.status,
+        program: newProgram
+      }
+    };
+  });
+
+  if (updated) {
+    console.log('[HomeConnect] Local progress update (no API call)');
+    broadcast('homeconnect', updatedStatuses);
+  }
+}
+
+function startProgressTimer() {
+  if (progressTimer) {
+    return;
+  }
+
+  progressTimer = setInterval(updateProgressLocally, PROGRESS_UPDATE_INTERVAL_MS);
+}
+
+function stopProgressTimer() {
+  if (progressTimer) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
+}
+
 async function refreshNow() {
   return await fetchStatusesFromApi();
 }
@@ -386,6 +460,7 @@ function startPolling() {
 
   pollTimer = setInterval(pollAppliances, POLL_INTERVAL_MS);
   pollAppliances();
+  startProgressTimer();
 }
 
 function stopPolling() {
@@ -393,6 +468,7 @@ function stopPolling() {
     clearInterval(pollTimer);
     pollTimer = null;
   }
+  stopProgressTimer();
 }
 
 function configure(clientId, clientSecret) {
