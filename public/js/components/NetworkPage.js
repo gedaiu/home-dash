@@ -50,13 +50,6 @@ const DISPLAY_MODES = [
   { value: 'ips', label: 'IPs' }
 ];
 
-const DEST_LIMITS = [
-  { value: 30, label: '30' },
-  { value: 50, label: '50' },
-  { value: 100, label: '100' },
-  { value: 200, label: '200' },
-  { value: 0, label: 'All' }
-];
 
 export function NetworkPage() {
   const [state, setState] = useState(openwrtState.value);
@@ -65,7 +58,7 @@ export function NetworkPage() {
   const [selDest, setSelDest] = useState(null);
   const [viewMode, setViewMode] = useState('local');
   const [displayMode, setDisplayMode] = useState('orgs');
-  const [maxDests, setMaxDests] = useState(30);
+  const [showIdleDevices, setShowIdleDevices] = useState(true);
   const [editingDevice, setEditingDevice] = useState(null);
   const [customizations, setCustomizations] = useState(deviceCustomizations.value);
 
@@ -259,7 +252,27 @@ export function NetworkPage() {
   })();
 
   // Get selected item details
-  const selectedDeviceData = selectedMac ? connectionData.devices.get(selectedMac) : null;
+  // For devices, fall back to basic info from sortedDevices if no connection data exists
+  const selectedDeviceData = (() => {
+    if (!selectedMac) return null;
+    const connData = connectionData.devices.get(selectedMac);
+    if (connData) return connData;
+
+    // Fall back to basic device info for devices without connections
+    const device = sortedDevices.find(d => d.mac === selectedMac);
+    if (device) {
+      return {
+        mac: device.mac,
+        hostname: device.hostname || device.mac.substring(0, 8),
+        ip: device.ip,
+        totalBytes: 0,
+        connectionCount: 0,
+        countries: new Map(),
+        destinations: new Map()
+      };
+    }
+    return null;
+  })();
   const selectedCountryData = selCountry ? connectionData.countries.get(selCountry) : null;
   const selectedDestData = selDest ? connectionData.destinations.get(selDest) : null;
 
@@ -386,7 +399,7 @@ export function NetworkPage() {
           <div class="network-graph-panel">
             <${ConnectionGraph}
               displayMode=${displayMode}
-              maxDestinations=${maxDests === 0 ? Infinity : maxDests}
+              showIdleDevices=${showIdleDevices}
             />
           </div>
 
@@ -401,15 +414,14 @@ export function NetworkPage() {
                   <option value=${m.value}>${m.label}</option>
                 `)}
               </select>
-              <select
-                class="control-select"
-                value=${maxDests}
-                onChange=${(e) => setMaxDests(Number(e.target.value))}
+              <button
+                class="control-btn ${showIdleDevices ? 'active' : ''}"
+                onClick=${() => setShowIdleDevices(!showIdleDevices)}
+                title="${showIdleDevices ? 'Hide' : 'Show'} idle devices"
               >
-                ${DEST_LIMITS.map(l => html`
-                  <option value=${l.value}>${l.label}</option>
-                `)}
-              </select>
+                <i data-lucide="${showIdleDevices ? 'eye' : 'eye-off'}"></i>
+                <span>Idle</span>
+              </button>
             </div>
 
             ${routers.map(router => html`
@@ -474,58 +486,71 @@ export function NetworkPage() {
                         <span class="stat-label">Connections</span>
                       </div>
                     </div>
-                    <div class="details-section">
-                      <div class="section-title">Countries</div>
-                      <div class="details-list">
-                        ${getDeviceCountries(selectedDeviceData).slice(0, 8).map(c => html`
-                          <div class="details-row clickable" onClick=${() => {
-                            selectedDeviceMac.value = null;
-                            selectedCountry.value = c.code;
-                            selectedDestination.value = null;
-                          }}>
-                            <span class="row-color" style="background: ${getCountryColor(c.code)}"></span>
-                            <span class="row-label">${c.code}</span>
-                            <span class="row-value">${formatBytes(c.bytes)}</span>
+                    ${getDeviceCountries(selectedDeviceData).length > 0 && html`
+                      <div class="details-section">
+                        <div class="section-title">Countries</div>
+                        <div class="details-list">
+                          ${getDeviceCountries(selectedDeviceData).slice(0, 8).map(c => html`
+                            <div class="details-row clickable" onClick=${() => {
+                              selectedDeviceMac.value = null;
+                              selectedCountry.value = c.code;
+                              selectedDestination.value = null;
+                            }}>
+                              <span class="row-color" style="background: ${getCountryColor(c.code)}"></span>
+                              <span class="row-label">${c.code}</span>
+                              <span class="row-value">${formatBytes(c.bytes)}</span>
+                            </div>
+                          `)}
+                        </div>
+                      </div>
+                    `}
+                    ${getDeviceDestinations(selectedDeviceData).length > 0 && html`
+                      <div class="details-section">
+                        <div class="section-title">Top Destinations</div>
+                        <div class="details-list">
+                          ${getDeviceDestinations(selectedDeviceData).slice(0, 8).map(d => html`
+                            <div class="details-row clickable" onClick=${() => {
+                              selectedDeviceMac.value = null;
+                              selectedCountry.value = d.country;
+                              selectedDestination.value = d.label;
+                            }}>
+                              <span class="row-color" style="background: ${getCountryColor(d.country)}"></span>
+                              <span class="row-label">${d.label}</span>
+                              <span class="row-value">${formatBytes(d.bytes)}</span>
+                            </div>
+                          `)}
+                        </div>
+                      </div>
+                    `}
+                    ${selectedDeviceData.connectionCount === 0 && html`
+                      <div class="details-section">
+                        <div class="data-info-note">
+                          No traffic data available. This device hasn't made any tracked outbound connections recently, or it may act as a gateway/router.
+                        </div>
+                      </div>
+                    `}
+                    ${selectedDeviceData.connectionCount > 0 && html`
+                      <div class="details-section data-info">
+                        <div class="section-title">Data Info</div>
+                        <div class="details-list">
+                          <div class="details-row">
+                            <span class="row-label">Time window</span>
+                            <span class="row-value">${formatTimeRange(selectedDeviceData.lastSeen - selectedDeviceData.firstSeen)}</span>
                           </div>
-                        `)}
-                      </div>
-                    </div>
-                    <div class="details-section">
-                      <div class="section-title">Top Destinations</div>
-                      <div class="details-list">
-                        ${getDeviceDestinations(selectedDeviceData).slice(0, 8).map(d => html`
-                          <div class="details-row clickable" onClick=${() => {
-                            selectedDeviceMac.value = null;
-                            selectedCountry.value = d.country;
-                            selectedDestination.value = d.label;
-                          }}>
-                            <span class="row-color" style="background: ${getCountryColor(d.country)}"></span>
-                            <span class="row-label">${d.label}</span>
-                            <span class="row-value">${formatBytes(d.bytes)}</span>
+                          <div class="details-row">
+                            <span class="row-label">Last seen</span>
+                            <span class="row-value">${formatDuration(Date.now() - selectedDeviceData.lastSeen)}</span>
                           </div>
-                        `)}
-                      </div>
-                    </div>
-                    <div class="details-section data-info">
-                      <div class="section-title">Data Info</div>
-                      <div class="details-list">
-                        <div class="details-row">
-                          <span class="row-label">Time window</span>
-                          <span class="row-value">${formatTimeRange(selectedDeviceData.lastSeen - selectedDeviceData.firstSeen)}</span>
+                          <div class="details-row">
+                            <span class="row-label">Source</span>
+                            <span class="row-value">conntrack</span>
+                          </div>
                         </div>
-                        <div class="details-row">
-                          <span class="row-label">Last seen</span>
-                          <span class="row-value">${formatDuration(Date.now() - selectedDeviceData.lastSeen)}</span>
-                        </div>
-                        <div class="details-row">
-                          <span class="row-label">Source</span>
-                          <span class="row-value">conntrack</span>
+                        <div class="data-info-note">
+                          Traffic shows bytes from active connections tracked via conntrack. Connections are pruned after 5 min of inactivity. Long-lived connections show cumulative bytes; short-lived connections may under-count total traffic.
                         </div>
                       </div>
-                      <div class="data-info-note">
-                        Traffic shows bytes from active connections tracked via conntrack. Connections are pruned after 5 min of inactivity. Long-lived connections show cumulative bytes; short-lived connections may under-count total traffic.
-                      </div>
-                    </div>
+                    `}
                     <button class="btn btn-secondary btn-block" onClick=${() => setEditingDevice({ mac: selectedMac, hostname: selectedDeviceData.hostname, ip: selectedDeviceData.ip })}>
                       <i data-lucide="settings"></i>
                       Customize Device
@@ -661,9 +686,11 @@ export function NetworkPage() {
                         <span class="device-indicator" style="background: ${getDeviceColor(device.mac, device.hostname)}">
                           <i data-lucide="${getDeviceIcon(device.mac, device.hostname)}"></i>
                         </span>
-                        <span class="device-name">${getDeviceDisplayName(device.mac, device.hostname, device.hostname || device.mac)}</span>
+                        <span class="device-name">
+                          <span class="device-name-text">${getDeviceDisplayName(device.mac, device.hostname, device.hostname || device.mac)}</span>
+                          ${isDeviceVerified(device.mac, device.hostname) && html`<i data-lucide="badge-check" class="verified-icon"></i>`}
+                        </span>
                         <span class="device-ip">${device.ip}</span>
-                        ${isDeviceVerified(device.mac, device.hostname) && html`<i data-lucide="badge-check" class="verified-icon"></i>`}
                       </div>
                     `)}
                   `}

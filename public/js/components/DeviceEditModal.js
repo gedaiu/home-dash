@@ -41,8 +41,6 @@ export function DeviceEditModal({ device, onClose }) {
     }
   };
 
-  const selectedColor = DEVICE_COLORS.find(c => c.id === color)?.color || '#00d4aa';
-
   return html`
     <div class="modal-backdrop" onClick=${handleBackdropClick}>
       <div class="modal device-edit-modal">
@@ -53,13 +51,6 @@ export function DeviceEditModal({ device, onClose }) {
         </div>
 
         <div class="modal-body">
-          <div class="device-preview" style="border-color: ${selectedColor}">
-            <i data-lucide="${DEVICE_TYPES.find(t => t.id === type)?.icon || 'help-circle'}"
-               style="color: ${selectedColor}"></i>
-            <span class="preview-name" style="color: ${selectedColor}">${name || device.hostname || device.mac}</span>
-            ${verified && html`<i data-lucide="badge-check" class="verified-badge"></i>`}
-          </div>
-
           <div class="form-group">
             <label>Name</label>
             <input
@@ -108,7 +99,6 @@ export function DeviceEditModal({ device, onClose }) {
                 checked=${verified}
                 onChange=${(e) => setVerified(e.target.checked)}
               />
-              <i data-lucide="badge-check" class="checkbox-icon"></i>
               <span>Verified device</span>
             </label>
             <p class="form-hint">Mark this device as verified to indicate you've confirmed its identity.</p>

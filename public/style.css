@@ -1852,6 +1852,35 @@ select optgroup {
   color: var(--text);
 }
 
+.control-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-family: 'VT323', monospace;
+  font-size: var(--text-base);
+  cursor: pointer;
+}
+
+.control-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.control-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.control-btn i {
+  width: 14px;
+  height: 14px;
+}
+
 .router-panel {
   flex-shrink: 0;
 }
@@ -1982,15 +2011,22 @@ select optgroup {
 }
 
 .verified-icon {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   color: var(--primary);
   flex-shrink: 0;
 }
 
 .device-name {
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: var(--text-base);
+  min-width: 0;
+}
+
+.device-name-text {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2334,6 +2370,21 @@ select optgroup {
 @keyframes pulse-resolver {
   0%, 100% { opacity: 0.7; }
   50% { opacity: 1; }
+}
+
+.device-tooltip {
+  position: fixed;
+  background: rgba(0, 0, 0, 0.9);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 6px 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 100;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
 .radial-empty {

@@ -24,15 +24,16 @@ function setBroadcast(fn) {
   broadcastFn = fn;
 }
 
-function broadcast(type, data) {
+function broadcast(data) {
   if (broadcastFn) {
-    broadcastFn({ type, data });
+    broadcastFn({ type: 'sync', data });
   }
 }
 
 function log(message) {
-  const timestamp = new Date().toLocaleTimeString();
-  broadcast('log', { timestamp, message });
+  if (broadcastFn) {
+    broadcastFn({ type: 'log', data: { source: 'sync', message } });
+  }
 }
 
 function getStatus() {
@@ -69,7 +70,7 @@ async function start() {
   state.nanoleafOff = false;
 
   log(`Starting sync: ${config.sync.hueDeviceName} -> Nanoleaf`);
-  broadcast('status', getStatus());
+  broadcast(getStatus());
 
   await poll();
   schedulePoll();
@@ -85,7 +86,7 @@ function stop() {
 
   state.running = false;
   log('Sync stopped');
-  broadcast('status', getStatus());
+  broadcast(getStatus());
 
   return { success: true };
 }
@@ -127,7 +128,7 @@ async function poll() {
         state.currentColor = { r: 0, g: 0, b: 0 };
         state.lastLightState = null;
         storage.logLightChange(config.sync.hueDeviceName, { r: 0, g: 0, b: 0 }, 'unreachable', { on: false, bri: 0 });
-        broadcast('status', getStatus());
+        broadcast(getStatus());
       }
       return;
     }
@@ -144,7 +145,7 @@ async function poll() {
         state.lastLightState = { ...lightState };
         state.fastPollUntil = Date.now() + FAST_POLL_DURATION_MS;
         storage.logLightChange(config.sync.hueDeviceName, { r: 0, g: 0, b: 0 }, reason, lightState);
-        broadcast('status', getStatus());
+        broadcast(getStatus());
       }
       return;
     }
@@ -185,12 +186,12 @@ async function poll() {
       state.lastSync = new Date().toISOString();
       state.fastPollUntil = Date.now() + FAST_POLL_DURATION_MS;
 
-      broadcast('status', getStatus());
+      broadcast(getStatus());
     }
   } catch (err) {
     state.lastError = err.message;
     log(`Error: ${err.message}`);
-    broadcast('status', getStatus());
+    broadcast(getStatus());
   }
 }
 
