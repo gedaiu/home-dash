@@ -377,18 +377,18 @@ function buildSubnetRings(deviceList) {
 // ============================================================================
 
 function calculateRingRadii(subnets, minDimension, countryRadius) {
-  const minDeviceSpacing = 45;
-  const subnetGap = 50;
-  const splitRingGap = 35;
-  const gatewayGap = 30;
+  const minDeviceSpacing = 55;
+  const subnetGap = 60;
+  const splitRingGap = 45;
+  const gatewayGap = 40;
 
   const subnetRadii = subnets.map((subnetData) => {
     const deviceCount = subnetData.devices.filter(d => !d.isGateway).length;
-    const minRadius = Math.max(40, (deviceCount * minDeviceSpacing) / (2 * Math.PI));
+    const minRadius = Math.max(80, (deviceCount * minDeviceSpacing) / (2 * Math.PI));
     return minRadius;
   });
 
-  let currentRadius = Math.max(subnetRadii[0] || 50, minDimension * 0.08);
+  let currentRadius = Math.max(subnetRadii[0] || 90, minDimension * 0.15);
   const ringRadii = [currentRadius];
 
   for (let i = 1; i < subnets.length; i++) {
@@ -449,14 +449,7 @@ function positionDevices(subnets, ringRadii, scaleFactor, centerX, centerY) {
       });
     });
 
-    let nextSubnetRadius = radius + 30 * scaleFactor;
-    for (let j = subnetIndex + 1; j < subnets.length; j++) {
-      if (subnets[j]?.subnet !== subnetData.subnet) {
-        nextSubnetRadius = ringRadii[j] * scaleFactor;
-        break;
-      }
-    }
-    const gatewayRadius = (radius + nextSubnetRadius) / 2;
+    const gatewayRadius = radius;
 
     gatewayDevices.forEach((device, i) => {
       const angle = -Math.PI / 2 + (i - (gatewayDevices.length - 1) / 2) * 0.25;
@@ -719,7 +712,7 @@ function drawDeviceNode(ctx, device, centerX, selectedMac, selectedCountryCode) 
     alpha = 0.5;
   }
 
-  const radius = isHighlighted ? 16 : (device.isGatewayNode ? 14 : 12);
+  const radius = isHighlighted ? 14 : 12;
   const highlightColor = isHighlighted ? '#fff' : deviceColor;
   const fillColor = device.online ? deviceColor : '#4a4a4a';
 
