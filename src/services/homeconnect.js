@@ -188,7 +188,7 @@ async function getApplianceEvents(haId) {
   try {
     const result = await apiRequest(`/api/homeappliances/${haId}/events`);
     console.log('[HomeConnect] Events for', haId, ':', JSON.stringify(result, null, 2));
-    return result.data?.items || [];
+    return result.data?.events || [];
   } catch (err) {
     console.log('[HomeConnect] Events fetch failed for', haId, ':', err.message);
     return [];
