@@ -187,8 +187,10 @@ async function getApplianceProgram(haId) {
 async function getApplianceEvents(haId) {
   try {
     const result = await apiRequest(`/api/homeappliances/${haId}/events`);
+    console.log('[HomeConnect] Events for', haId, ':', JSON.stringify(result, null, 2));
     return result.data?.items || [];
-  } catch {
+  } catch (err) {
+    console.log('[HomeConnect] Events fetch failed for', haId, ':', err.message);
     return [];
   }
 }
@@ -236,6 +238,9 @@ async function getDishwasherStatus(haId) {
     getApplianceEvents(haId)
   ]);
 
+  console.log('[HomeConnect] Raw status items:', JSON.stringify(statusList, null, 2));
+  console.log('[HomeConnect] Raw events:', JSON.stringify(events, null, 2));
+
   const status = {};
   for (const item of statusList) {
     const key = item.key.split('.').pop();
@@ -270,10 +275,11 @@ async function getDishwasherStatus(haId) {
 
   const warnings = [];
   for (const event of events) {
-    if (event.key === 'Dishcare.Dishwasher.Event.SaltNearlyEmpty') {
+    const isPresent = event.value === 'BSH.Common.EnumType.EventPresentState.Present';
+    if (event.key === 'Dishcare.Dishwasher.Event.SaltNearlyEmpty' && isPresent) {
       warnings.push('salt_low');
     }
-    if (event.key === 'Dishcare.Dishwasher.Event.RinseAidNearlyEmpty') {
+    if (event.key === 'Dishcare.Dishwasher.Event.RinseAidNearlyEmpty' && isPresent) {
       warnings.push('rinse_aid_low');
     }
   }

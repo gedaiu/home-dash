@@ -4,9 +4,17 @@ import { effect } from 'https://esm.sh/@preact/signals@1.2.1';
 import { openwrtState, selectedDeviceMac } from '../state.js';
 import { ConnectionGraph } from './ConnectionGraph.js';
 
+function formatBytes(bytes) {
+  if (!bytes || bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
+}
+
 export function NetworkPage() {
   const [state, setState] = useState(openwrtState.value);
   const [selectedMac, setSelectedMac] = useState(null);
+  const [viewMode, setViewMode] = useState('local'); // 'local' or 'remote'
 
   useEffect(() => {
     const dispose = effect(() => {
@@ -37,6 +45,37 @@ export function NetworkPage() {
   const { routers, devices, connections } = state;
   const sortedDevices = [...devices].sort((a, b) => ipToNumber(a.ip) - ipToNumber(b.ip));
   const hasData = routers.length > 0;
+
+  // Build remote destinations from connections
+  const remoteDestinations = (() => {
+    const destMap = new Map();
+
+    for (const conn of connections) {
+      if (!conn.enriched) {
+        continue;
+      }
+
+      const ip = conn.dst_ip;
+      const existing = destMap.get(ip);
+      const bytes = conn.bytes || 0;
+
+      if (existing) {
+        existing.bytes += bytes;
+        existing.connectionCount++;
+      } else {
+        destMap.set(ip, {
+          ip,
+          hostname: conn.enriched.hostname || null,
+          country: conn.enriched.country || null,
+          org: conn.enriched.org || conn.enriched.asName || null,
+          bytes,
+          connectionCount: 1
+        });
+      }
+    }
+
+    return Array.from(destMap.values()).sort((a, b) => b.bytes - a.bytes);
+  })();
 
   return html`
     <div class="network-page">
@@ -115,23 +154,52 @@ export function NetworkPage() {
 
             <section class="panel devices-panel">
               <div class="panel-header">
-                <i data-lucide="smartphone"></i>
-                <span>DEVICES (${sortedDevices.filter(d => d.online).length}/${sortedDevices.length})</span>
+                <i data-lucide="${viewMode === 'local' ? 'smartphone' : 'globe'}"></i>
+                <span>${viewMode === 'local'
+                  ? `DEVICES (${sortedDevices.filter(d => d.online).length}/${sortedDevices.length})`
+                  : `DESTINATIONS (${remoteDestinations.length})`
+                }</span>
+                <button
+                  class="view-toggle-btn"
+                  onClick=${() => setViewMode(viewMode === 'local' ? 'remote' : 'local')}
+                  title=${viewMode === 'local' ? 'Show remote destinations' : 'Show local devices'}
+                >
+                  ${viewMode === 'local' ? 'Remote' : 'Local'}
+                </button>
               </div>
               <div class="panel-content device-list-panel">
-                ${sortedDevices.length === 0 && html`
-                  <div class="loading">No devices detected yet...</div>
+                ${viewMode === 'local' && html`
+                  ${sortedDevices.length === 0 && html`
+                    <div class="loading">No devices detected yet...</div>
+                  `}
+                  ${sortedDevices.map(device => html`
+                    <div
+                      class="device-row ${device.online ? 'online' : 'offline'} ${selectedMac === device.mac ? 'selected' : ''}"
+                      onClick=${() => handleDeviceClick(device)}
+                    >
+                      <span class="device-indicator"></span>
+                      <span class="device-name">${device.hostname || device.mac}</span>
+                      <span class="device-ip">${device.ip}</span>
+                    </div>
+                  `)}
                 `}
-                ${sortedDevices.map(device => html`
-                  <div
-                    class="device-row ${device.online ? 'online' : 'offline'} ${selectedMac === device.mac ? 'selected' : ''}"
-                    onClick=${() => handleDeviceClick(device)}
-                  >
-                    <span class="device-indicator"></span>
-                    <span class="device-name">${device.hostname || device.mac}</span>
-                    <span class="device-ip">${device.ip}</span>
-                  </div>
-                `)}
+                ${viewMode === 'remote' && html`
+                  ${remoteDestinations.length === 0 && html`
+                    <div class="loading">No remote connections yet...</div>
+                  `}
+                  ${remoteDestinations.map(dest => html`
+                    <div class="device-row remote-dest online">
+                      <span class="device-indicator" style="background: ${dest.country ? '#ff8c00' : '#666'}"></span>
+                      <div class="remote-dest-info">
+                        <span class="device-name">
+                          ${dest.country ? `[${dest.country}] ` : ''}${dest.hostname || dest.ip}
+                        </span>
+                        <span class="remote-dest-org">${dest.org || ''}</span>
+                      </div>
+                      <span class="remote-dest-traffic">${formatBytes(dest.bytes)}</span>
+                    </div>
+                  `)}
+                `}
               </div>
             </section>
           </div>

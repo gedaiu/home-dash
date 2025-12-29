@@ -1,9 +1,12 @@
 const fs = require('fs');
 const path = require('path');
+const dns = require('dns').promises;
 
 // In-memory cache
 const cache = new Map();
+const dnsCache = new Map();
 const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+const DNS_CACHE_TTL = 24 * 60 * 60 * 1000; // 1 day for DNS
 
 // Persistent cache file
 const CACHE_FILE = path.join(__dirname, '../../data/ip-cache.json');
@@ -92,6 +95,36 @@ function isPrivateOrReserved(ip) {
   return false;
 }
 
+// Reverse DNS lookup with caching
+async function reverseDns(ip) {
+  const cached = dnsCache.get(ip);
+  if (cached && Date.now() - cached.timestamp < DNS_CACHE_TTL) {
+    return cached.hostname;
+  }
+
+  try {
+    const hostnames = await dns.reverse(ip);
+    const hostname = hostnames && hostnames.length > 0 ? hostnames[0] : null;
+    dnsCache.set(ip, { hostname, timestamp: Date.now() });
+    return hostname;
+  } catch {
+    dnsCache.set(ip, { hostname: null, timestamp: Date.now() });
+    return null;
+  }
+}
+
+// Resolver status tracking
+const resolverStatus = {
+  total: 0,
+  resolved: 0,
+  pending: 0,
+  inProgress: false
+};
+
+function getResolverStatus() {
+  return { ...resolverStatus };
+}
+
 // Lookup IP address
 async function lookup(ip) {
   // Skip private/reserved IPs
@@ -102,8 +135,18 @@ async function lookup(ip) {
   // Check cache first
   const cached = cache.get(ip);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    // If cached but missing hostname, try to resolve it
+    if (cached.data && cached.data.hostname === undefined) {
+      const hostname = await reverseDns(ip);
+      if (hostname) {
+        cached.data.hostname = hostname;
+      }
+    }
     return cached.data;
   }
+
+  // Do reverse DNS lookup (non-blocking, cached)
+  const hostname = await reverseDns(ip);
 
   // Try geoip-lite first (local database, fast)
   if (geoipLite) {
@@ -111,6 +154,7 @@ async function lookup(ip) {
     if (result) {
       const data = {
         ip,
+        hostname,
         country: result.country,
         countryName: getCountryName(result.country),
         region: result.region,
@@ -127,6 +171,7 @@ async function lookup(ip) {
   // Fall back to ip-api.com (free tier: 45 requests/minute)
   try {
     const data = await fetchFromIpApi(ip);
+    data.hostname = hostname;
     cache.set(ip, { data, timestamp: Date.now() });
 
     // Periodically save cache
@@ -250,6 +295,59 @@ async function lookupBatch(ips) {
   return results;
 }
 
+// Resolve hostnames for all cached entries that don't have them
+async function resolveAllHostnames(onProgress) {
+  if (resolverStatus.inProgress) {
+    return { success: false, message: 'Resolution already in progress' };
+  }
+
+  const ipsToResolve = [];
+
+  for (const [ip, entry] of cache) {
+    if (entry.data && entry.data.hostname === undefined) {
+      ipsToResolve.push(ip);
+    }
+  }
+
+  resolverStatus.total = ipsToResolve.length;
+  resolverStatus.resolved = 0;
+  resolverStatus.pending = ipsToResolve.length;
+  resolverStatus.inProgress = true;
+
+  if (onProgress) {
+    onProgress({ ...resolverStatus });
+  }
+
+  for (const ip of ipsToResolve) {
+    try {
+      const hostname = await reverseDns(ip);
+      const cached = cache.get(ip);
+      if (cached && cached.data) {
+        cached.data.hostname = hostname;
+      }
+      resolverStatus.resolved++;
+      resolverStatus.pending--;
+
+      if (onProgress) {
+        onProgress({ ...resolverStatus });
+      }
+    } catch {
+      resolverStatus.resolved++;
+      resolverStatus.pending--;
+    }
+  }
+
+  resolverStatus.inProgress = false;
+
+  if (onProgress) {
+    onProgress({ ...resolverStatus });
+  }
+
+  saveCache();
+
+  return { success: true, resolved: resolverStatus.resolved };
+}
+
 // Initialize
 loadCache();
 
@@ -266,5 +364,7 @@ process.on('SIGINT', () => {
 module.exports = {
   lookup,
   lookupBatch,
-  getCountryName
+  getCountryName,
+  getResolverStatus,
+  resolveAllHostnames
 };

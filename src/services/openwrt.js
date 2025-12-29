@@ -382,6 +382,25 @@ function getGraphData() {
   return { nodes, edges };
 }
 
+// Re-enrich all connections with fresh GeoIP data (used after hostname resolution)
+async function refreshConnectionEnrichment() {
+  for (const [key, conn] of connectionMap) {
+    if (conn.dst_ip && !isPrivateIP(conn.dst_ip)) {
+      const enriched = await geoip.lookup(conn.dst_ip);
+      if (enriched) {
+        conn.enriched = enriched;
+      }
+    }
+  }
+
+  state.connections = Array.from(connectionMap.values());
+
+  broadcast({
+    type: 'openwrt:connections',
+    data: state.connections
+  });
+}
+
 module.exports = {
   setBroadcast,
   handleAgentConnection,
@@ -389,5 +408,6 @@ module.exports = {
   getRouters,
   getDevices,
   getConnections,
-  getGraphData
+  getGraphData,
+  refreshConnectionEnrichment
 };

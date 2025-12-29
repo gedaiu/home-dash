@@ -48,6 +48,14 @@ export const selectedDeviceMac = signal(null);
 export const weatherState = signal(null);
 export const transportState = signal(null);
 
+// Resolver state
+export const resolverState = signal({
+  total: 0,
+  resolved: 0,
+  pending: 0,
+  inProgress: false
+});
+
 // Log management
 export function addLog(message, type = '') {
   const time = new Date().toLocaleTimeString();

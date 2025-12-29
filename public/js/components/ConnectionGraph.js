@@ -1,9 +1,13 @@
 import { html } from 'https://esm.sh/htm@3.1.1/preact';
 import { useEffect, useState, useRef } from 'https://esm.sh/preact@10.19.3/hooks';
 import { effect } from 'https://esm.sh/@preact/signals@1.2.1';
-import { openwrtState, selectedDeviceMac } from '../state.js';
+import { openwrtState, selectedDeviceMac, resolverState } from '../state.js';
+import { sendMessage } from '../websocket-preact.js';
 
-function buildConnectionData(connections, devices) {
+const DEST_LIMITS = [30, 50, 100, 200];
+
+// displayMode: 'orgs' | 'ips' | 'hosts'
+function buildConnectionData(connections, devices, displayMode = 'orgs', maxDestinations = 30) {
   const deviceMap = new Map();
   const destinationMap = new Map();
 
@@ -39,21 +43,33 @@ function buildConnectionData(connections, devices) {
     const device = deviceMap.get(conn.srcMac);
     const org = conn.enriched.org || conn.enriched.asName || conn.enriched.isp;
     const country = conn.enriched.country;
-    const dstLabel = org || country || conn.dst_ip;
+    const dstIP = conn.dst_ip;
+    const dstHostname = conn.enriched.hostname;
+    const countryPrefix = country ? `[${country}] ` : '';
+
+    let dstLabel;
+    if (displayMode === 'ips') {
+      dstLabel = countryPrefix + dstIP;
+    } else if (displayMode === 'hosts') {
+      dstLabel = countryPrefix + (dstHostname || dstIP);
+    } else {
+      dstLabel = countryPrefix + (org || dstIP);
+    }
+
     const bytes = conn.bytes || 0;
 
     device.totalBytes += bytes;
     device.connectionCount += 1;
 
     if (!device.destinations.has(dstLabel)) {
-      device.destinations.set(dstLabel, { label: dstLabel, country, org, bytes: 0, count: 0 });
+      device.destinations.set(dstLabel, { label: dstLabel, country, org, ip: dstIP, hostname: dstHostname, bytes: 0, count: 0 });
     }
     const dest = device.destinations.get(dstLabel);
     dest.bytes += bytes;
     dest.count += 1;
 
     if (!destinationMap.has(dstLabel)) {
-      destinationMap.set(dstLabel, { label: dstLabel, country, org, totalBytes: 0, devices: new Set() });
+      destinationMap.set(dstLabel, { label: dstLabel, country, org, ip: dstIP, hostname: dstHostname, totalBytes: 0, devices: new Set() });
     }
     const destGlobal = destinationMap.get(dstLabel);
     destGlobal.totalBytes += bytes;
@@ -66,7 +82,7 @@ function buildConnectionData(connections, devices) {
 
   const destinationList = Array.from(destinationMap.values())
     .sort((a, b) => b.totalBytes - a.totalBytes)
-    .slice(0, 30);
+    .slice(0, maxDestinations);
 
   return { devices: deviceList, destinations: destinationList };
 }
@@ -87,24 +103,75 @@ function getCountryColor(country) {
   return colors[country] || '#cc7000';
 }
 
+const DISPLAY_MODES = ['orgs', 'hosts', 'ips'];
+const DISPLAY_MODE_LABELS = { orgs: 'Orgs', hosts: 'Hosts', ips: 'IPs' };
+
 export function ConnectionGraph() {
   const [data, setData] = useState({ devices: [], destinations: [] });
   const [selectedMac, setSelectedMac] = useState(null);
   const [selectedDest, setSelectedDest] = useState(null);
   const [hoveredDest, setHoveredDest] = useState(null);
+  const [displayMode, setDisplayMode] = useState('orgs');
+  const [resolver, setResolver] = useState({ total: 0, resolved: 0, pending: 0, inProgress: false });
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  const [maxDests, setMaxDests] = useState(30);
   const canvasRef = useRef(null);
+  const lastStateRef = useRef(null);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const canvas = canvasRef.current;
+      if (canvas && canvas.parentElement) {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        setDimensions({ width: rect.width, height: rect.height });
+      }
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    const dispose = effect(() => {
+      setResolver(resolverState.value);
+    });
+    return dispose;
+  }, []);
 
   useEffect(() => {
     let lastUpdate = 0;
     const dispose = effect(() => {
       const state = openwrtState.value;
+      lastStateRef.current = state;
       const now = Date.now();
       if (now - lastUpdate < 3000) return;
       lastUpdate = now;
-      setData(buildConnectionData(state.connections || [], state.devices || []));
+      setData(buildConnectionData(state.connections || [], state.devices || [], displayMode, maxDests));
     });
     return dispose;
-  }, []);
+  }, [displayMode, maxDests]);
+
+  const cycleDisplayMode = () => {
+    const currentIndex = DISPLAY_MODES.indexOf(displayMode);
+    const nextIndex = (currentIndex + 1) % DISPLAY_MODES.length;
+    const newMode = DISPLAY_MODES[nextIndex];
+    setDisplayMode(newMode);
+    setSelectedDest(null);
+    if (lastStateRef.current) {
+      setData(buildConnectionData(lastStateRef.current.connections || [], lastStateRef.current.devices || [], newMode, maxDests));
+    }
+  };
+
+  const startResolver = () => {
+    sendMessage('resolver:start');
+  };
+
+  const cycleDestLimit = () => {
+    const currentIndex = DEST_LIMITS.indexOf(maxDests);
+    const nextIndex = (currentIndex + 1) % DEST_LIMITS.length;
+    setMaxDests(DEST_LIMITS[nextIndex]);
+  };
 
   useEffect(() => {
     const dispose = effect(() => setSelectedMac(selectedDeviceMac.value));
@@ -129,8 +196,15 @@ export function ConnectionGraph() {
 
     const centerX = width / 2;
     const centerY = height / 2;
-    const innerRadius = Math.min(width, height) * 0.15;
-    const outerRadius = Math.min(width, height) * 0.42;
+    const minDimension = Math.min(width, height);
+
+    // Skip drawing if container has no size
+    if (minDimension < 10) {
+      return;
+    }
+
+    const innerRadius = minDimension * 0.15;
+    const outerRadius = minDimension * 0.42;
 
     // Clear
     ctx.fillStyle = '#0a0a0a';
@@ -139,10 +213,13 @@ export function ConnectionGraph() {
     // Draw grid circles
     ctx.strokeStyle = 'rgba(255, 140, 0, 0.1)';
     ctx.lineWidth = 1;
-    for (let r = innerRadius; r <= outerRadius; r += (outerRadius - innerRadius) / 3) {
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
-      ctx.stroke();
+    const ringStep = (outerRadius - innerRadius) / 3;
+    if (ringStep > 0) {
+      for (let r = innerRadius; r <= outerRadius; r += ringStep) {
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
 
     // Position destinations around outer ring
@@ -239,8 +316,9 @@ export function ConnectionGraph() {
         ctx.stroke();
       }
 
-      // Label
-      if (isHovered || isSelected || (!selectedMac && !selectedDest && !hoveredDest)) {
+      // Label - show when hovered, selected, connected to selected device, or nothing selected
+      const showLabel = isHovered || isSelected || hasConnectionToSelectedDevice || (!selectedMac && !selectedDest && !hoveredDest);
+      if (showLabel) {
         ctx.fillStyle = `rgba(255, 140, 0, ${alpha})`;
         ctx.font = (isSelected ? 'bold ' : '') + '11px monospace';
         ctx.textAlign = dest.x > centerX ? 'left' : 'right';
@@ -288,7 +366,7 @@ export function ConnectionGraph() {
     canvas._devicePositions = devicePositions;
     canvas._destPositions = destPositions;
 
-  }, [data, selectedMac, selectedDest, hoveredDest]);
+  }, [data, selectedMac, selectedDest, hoveredDest, dimensions]);
 
   const handleCanvasClick = (e) => {
     const canvas = canvasRef.current;
@@ -374,6 +452,25 @@ export function ConnectionGraph() {
           onMouseMove=${handleCanvasMove}
           onMouseLeave=${() => setHoveredDest(null)}
         />
+        <div class="radial-toggle">
+          <button class="toggle-btn" onClick=${cycleDisplayMode}>
+            ${DISPLAY_MODE_LABELS[displayMode]}
+          </button>
+          <button class="toggle-btn" onClick=${cycleDestLimit} title="Max destinations shown">
+            ${maxDests}
+          </button>
+          ${displayMode === 'hosts' && html`
+            <button
+              class="toggle-btn resolver-btn ${resolver.inProgress ? 'resolving' : ''}"
+              onClick=${startResolver}
+              disabled=${resolver.inProgress}
+            >
+              ${resolver.inProgress
+                ? `Resolving ${resolver.resolved}/${resolver.total}`
+                : 'Resolve'}
+            </button>
+          `}
+        </div>
         ${!hasData && html`
           <div class="radial-empty">
             <span>Waiting for connection data...</span>

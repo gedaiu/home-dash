@@ -7,6 +7,7 @@ import {
   openwrtState,
   weatherState,
   transportState,
+  resolverState,
   wsConnected,
   wsLatency,
   addLog
@@ -103,6 +104,17 @@ function handleMessage(msg) {
         addLog(`${prefix}${msg.data.message}`, msg.data.level || '');
       }
       break;
+
+    case 'resolver:status':
+    case 'resolver:progress':
+      resolverState.value = msg.data;
+      break;
+  }
+}
+
+export function sendMessage(type, data = {}) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type, ...data }));
   }
 }
 

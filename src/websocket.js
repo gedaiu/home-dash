@@ -9,6 +9,7 @@ const openwrtService = require('./services/openwrt');
 const weatherService = require('./services/weather');
 const transportService = require('./services/transport');
 const storage = require('./services/storage');
+const geoip = require('./lib/geoip');
 
 let wss = null;
 const clients = new Set();
@@ -150,6 +151,23 @@ function handleMessage(ws, data) {
         type: 'status',
         data: syncService.getStatus()
       }));
+      break;
+    case 'resolver:status':
+      ws.send(JSON.stringify({
+        type: 'resolver:status',
+        data: geoip.getResolverStatus()
+      }));
+      break;
+    case 'resolver:start':
+      geoip.resolveAllHostnames((progress) => {
+        broadcast({
+          type: 'resolver:progress',
+          data: progress
+        });
+      }).then(() => {
+        // Re-enrich connections with fresh GeoIP data including hostnames
+        openwrtService.refreshConnectionEnrichment();
+      });
       break;
   }
 }
