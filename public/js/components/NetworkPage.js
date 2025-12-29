@@ -1,8 +1,20 @@
 import { html } from 'https://esm.sh/htm@3.1.1/preact';
 import { useState, useEffect } from 'https://esm.sh/preact@10.19.3/hooks';
 import { effect } from 'https://esm.sh/@preact/signals@1.2.1';
-import { openwrtState, selectedDeviceMac, selectedCountry, selectedDestination } from '../state.js';
+import {
+  openwrtState,
+  selectedDeviceMac,
+  selectedCountry,
+  selectedDestination,
+  loadDeviceCustomizations,
+  deviceCustomizations,
+  getDeviceColor,
+  getDeviceIcon,
+  isDeviceVerified,
+  getDeviceDisplayName
+} from '../state.js';
 import { ConnectionGraph } from './ConnectionGraph.js';
+import { DeviceEditModal } from './DeviceEditModal.js';
 
 function formatBytes(bytes) {
   if (!bytes || bytes === 0) return '0 B';
@@ -54,6 +66,21 @@ export function NetworkPage() {
   const [viewMode, setViewMode] = useState('local');
   const [displayMode, setDisplayMode] = useState('orgs');
   const [maxDests, setMaxDests] = useState(30);
+  const [editingDevice, setEditingDevice] = useState(null);
+  const [customizations, setCustomizations] = useState(deviceCustomizations.value);
+
+  // Load device customizations on mount
+  useEffect(() => {
+    loadDeviceCustomizations();
+  }, []);
+
+  // Subscribe to customization changes
+  useEffect(() => {
+    const dispose = effect(() => {
+      setCustomizations(deviceCustomizations.value);
+    });
+    return dispose;
+  }, []);
 
   useEffect(() => {
     const dispose = effect(() => {
@@ -83,12 +110,15 @@ export function NetworkPage() {
     return dispose;
   }, []);
 
-  // Re-create Lucide icons when selection changes
+  // Re-create Lucide icons when selection or customizations change
   useEffect(() => {
     if (window.lucide) {
-      window.lucide.createIcons();
+      // Use requestAnimationFrame to avoid duplicate icon processing
+      requestAnimationFrame(() => {
+        window.lucide.createIcons();
+      });
     }
-  }, [selectedMac, selCountry, selDest, state]);
+  }, [selectedMac, selCountry, selDest, viewMode, customizations]);
 
   const handleDeviceClick = (device) => {
     selectedDeviceMac.value = selectedDeviceMac.value === device.mac ? null : device.mac;
@@ -141,6 +171,8 @@ export function NetworkPage() {
           ip: device?.ip || conn.src_ip,
           totalBytes: 0,
           connectionCount: 0,
+          firstSeen: conn.lastSeen || Date.now(),
+          lastSeen: conn.lastSeen || Date.now(),
           countries: new Map(),
           destinations: new Map()
         });
@@ -148,6 +180,14 @@ export function NetworkPage() {
       const deviceData = deviceMap.get(conn.srcMac);
       deviceData.totalBytes += bytes;
       deviceData.connectionCount++;
+      if (conn.lastSeen) {
+        if (conn.lastSeen < deviceData.firstSeen) {
+          deviceData.firstSeen = conn.lastSeen;
+        }
+        if (conn.lastSeen > deviceData.lastSeen) {
+          deviceData.lastSeen = conn.lastSeen;
+        }
+      }
 
       // Track device's countries
       if (!deviceData.countries.has(country)) {
@@ -420,7 +460,7 @@ export function NetworkPage() {
                 <div class="panel-content details-content">
                   ${selectedMac && selectedDeviceData && html`
                     <div class="details-header">
-                      <span class="details-name device-color">${selectedDeviceData.hostname}</span>
+                      <span class="details-name device-color" style="color: ${getDeviceColor(selectedMac, selectedDeviceData.hostname)}">${getDeviceDisplayName(selectedMac, selectedDeviceData.hostname, selectedDeviceData.hostname)}</span>
                       <span class="details-subtitle">${selectedDeviceData.ip}</span>
                       <span class="details-subtitle mono">${selectedMac}</span>
                     </div>
@@ -466,6 +506,30 @@ export function NetworkPage() {
                         `)}
                       </div>
                     </div>
+                    <div class="details-section data-info">
+                      <div class="section-title">Data Info</div>
+                      <div class="details-list">
+                        <div class="details-row">
+                          <span class="row-label">Time window</span>
+                          <span class="row-value">${formatTimeRange(selectedDeviceData.lastSeen - selectedDeviceData.firstSeen)}</span>
+                        </div>
+                        <div class="details-row">
+                          <span class="row-label">Last seen</span>
+                          <span class="row-value">${formatDuration(Date.now() - selectedDeviceData.lastSeen)}</span>
+                        </div>
+                        <div class="details-row">
+                          <span class="row-label">Source</span>
+                          <span class="row-value">conntrack</span>
+                        </div>
+                      </div>
+                      <div class="data-info-note">
+                        Traffic shows bytes from active connections tracked via conntrack. Connections are pruned after 5 min of inactivity. Long-lived connections show cumulative bytes; short-lived connections may under-count total traffic.
+                      </div>
+                    </div>
+                    <button class="btn btn-secondary btn-block" onClick=${() => setEditingDevice({ mac: selectedMac, hostname: selectedDeviceData.hostname, ip: selectedDeviceData.ip })}>
+                      <i data-lucide="settings"></i>
+                      Customize Device
+                    </button>
                   `}
 
                   ${selCountry && !selDest && selectedCountryData && html`
@@ -495,8 +559,8 @@ export function NetworkPage() {
                             selectedCountry.value = null;
                             selectedDestination.value = null;
                           }}>
-                            <span class="row-color" style="background: #00d4aa"></span>
-                            <span class="row-label">${d.hostname}</span>
+                            <span class="row-color" style="background: ${getDeviceColor(d.mac, d.hostname)}"></span>
+                            <span class="row-label">${getDeviceDisplayName(d.mac, d.hostname, d.hostname)}</span>
                             <span class="row-value">${formatBytes(d.bytesToCountry)}</span>
                           </div>
                         `)}
@@ -538,8 +602,8 @@ export function NetworkPage() {
                             selectedCountry.value = null;
                             selectedDestination.value = null;
                           }}>
-                            <span class="row-color" style="background: #00d4aa"></span>
-                            <span class="row-label">${d.hostname}</span>
+                            <span class="row-color" style="background: ${getDeviceColor(d.mac, d.hostname)}"></span>
+                            <span class="row-label">${getDeviceDisplayName(d.mac, d.hostname, d.hostname)}</span>
                             <span class="row-value">${formatBytes(d.bytesToDest)}</span>
                           </div>
                         `)}
@@ -562,7 +626,7 @@ export function NetworkPage() {
                         </div>
                       </div>
                       <div class="data-info-note">
-                        Traffic is measured from active connections. Old connections are pruned after 5 minutes of inactivity.
+                        Traffic shows bytes from active connections tracked via conntrack. Connections are pruned after 5 min of inactivity. Long-lived connections show cumulative bytes; short-lived connections may under-count total traffic.
                       </div>
                     </div>
                   `}
@@ -591,12 +655,15 @@ export function NetworkPage() {
                     `}
                     ${sortedDevices.map(device => html`
                       <div
-                        class="device-row ${device.online ? 'online' : 'offline'} ${selectedMac === device.mac ? 'selected' : ''}"
+                        class="device-row ${device.online ? 'online' : 'offline'} ${selectedMac === device.mac ? 'selected' : ''} ${isDeviceVerified(device.mac, device.hostname) ? 'verified' : ''}"
                         onClick=${() => handleDeviceClick(device)}
                       >
-                        <span class="device-indicator"></span>
-                        <span class="device-name">${device.hostname || device.mac}</span>
+                        <span class="device-indicator" style="background: ${getDeviceColor(device.mac, device.hostname)}">
+                          <i data-lucide="${getDeviceIcon(device.mac, device.hostname)}"></i>
+                        </span>
+                        <span class="device-name">${getDeviceDisplayName(device.mac, device.hostname, device.hostname || device.mac)}</span>
                         <span class="device-ip">${device.ip}</span>
+                        ${isDeviceVerified(device.mac, device.hostname) && html`<i data-lucide="badge-check" class="verified-icon"></i>`}
                       </div>
                     `)}
                   `}
@@ -622,6 +689,13 @@ export function NetworkPage() {
             `}
           </div>
         </div>
+      `}
+
+      ${editingDevice && html`
+        <${DeviceEditModal}
+          device=${editingDevice}
+          onClose=${() => setEditingDevice(null)}
+        />
       `}
     </div>
   `;

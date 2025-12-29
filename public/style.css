@@ -7,9 +7,12 @@
   --text-dim: #cc7000;
   --text-bright: #ffaa33;
   --accent: #ff8c00;
+  --accent-hover: #ffa033;
   --success: #33ff33;
   --error: #ff3333;
   --warning: #ffff33;
+  --primary: #00d4aa;
+  --primary-hover: #00e6bb;
 
   /* Fonts */
   --font-main: 'IBM Plex Mono', 'Consolas', monospace;
@@ -1034,7 +1037,8 @@ select optgroup {
   animation: spin 1s linear infinite;
 }
 
-.modal {
+/* Legacy modal (used by discover-modal) */
+#discover-modal {
   position: fixed;
   top: 0;
   left: 0;
@@ -1042,17 +1046,16 @@ select optgroup {
   height: 100%;
   background: rgba(0, 0, 0, 0.8);
   display: flex;
-  justify-content: space-between;
   align-items: center;
   justify-content: center;
   z-index: 100;
 }
 
-.modal[hidden] {
+#discover-modal[hidden] {
   display: none;
 }
 
-.modal-content {
+#discover-modal .modal-content {
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -1954,16 +1957,35 @@ select optgroup {
 }
 
 .device-indicator {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
   background: var(--text-dim);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.device-indicator svg {
+  width: 14px;
+  height: 14px;
+  color: rgba(0, 0, 0, 0.7);
 }
 
 .device-row.online .device-indicator {
-  background: var(--success);
-  box-shadow: 0 0 6px var(--success);
+  box-shadow: 0 0 6px currentColor;
+}
+
+.device-row.verified {
+  border-left: 2px solid var(--primary);
+}
+
+.verified-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--primary);
+  flex-shrink: 0;
 }
 
 .device-name {
@@ -3547,4 +3569,336 @@ select optgroup {
   .journey-duration {
     margin-left: 0;
   }
+}
+
+/* Modal Styles */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal {
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-width: 500px;
+  width: 100%;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal.device-edit-modal {
+  max-width: 520px;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.modal-header .modal-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+
+.modal-header .close-btn {
+  margin-left: auto;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* Device Edit Modal Specific */
+.device-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  border: 2px solid var(--border);
+}
+
+.device-preview i {
+  width: 32px;
+  height: 32px;
+}
+
+.device-preview .preview-name {
+  font-size: 16px;
+  font-weight: 500;
+  flex: 1;
+}
+
+.device-preview .verified-badge {
+  width: 20px;
+  height: 20px;
+  color: var(--primary);
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-group > label {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+}
+
+.form-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.form-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 0;
+}
+
+.device-type-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+.device-type-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 4px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.device-type-btn i {
+  width: 20px;
+  height: 20px;
+}
+
+.device-type-btn span {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.device-type-btn:hover {
+  background: rgba(255, 140, 0, 0.1);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.device-type-btn.selected {
+  background: rgba(255, 140, 0, 0.2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.color-grid {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.color-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.color-btn:hover {
+  transform: scale(1.1);
+}
+
+.color-btn.selected {
+  border-color: white;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px currentColor;
+}
+
+.form-group.verified-group {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  transition: all 0.15s ease;
+}
+
+.form-group.verified-group:has(input:checked) {
+  border-color: var(--primary);
+  background: rgba(0, 212, 170, 0.05);
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.checkbox-label .checkbox-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--text-dim);
+  transition: color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.checkbox-label:has(input:checked) .checkbox-icon {
+  color: var(--primary);
+}
+
+.checkbox-label span {
+  font-weight: 500;
+}
+
+.form-group.verified-group .form-hint {
+  margin-top: 8px;
+  padding-left: 28px;
+}
+
+.device-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+}
+
+.device-info .info-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.device-info .info-label {
+  color: var(--text-dim);
+}
+
+.device-info .info-value {
+  color: var(--text);
+}
+
+.device-info .info-value.mono {
+  font-family: var(--font-mono);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn i,
+.btn svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  color: var(--bg);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+
+.btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 140, 0, 0.1);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-accent {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--bg);
+}
+
+.btn-accent:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.btn-block {
+  display: flex;
+  width: 100%;
 }

@@ -10,6 +10,7 @@ const panelsRoutes = require('./routes/panels');
 const openwrtRoutes = require('./routes/openwrt');
 const weatherRoutes = require('./routes/weather');
 const transportRoutes = require('./routes/transport');
+const devicesRoutes = require('./routes/devices');
 
 const app = express();
 
@@ -26,6 +27,7 @@ app.use('/api/panels', panelsRoutes);
 app.use('/api/openwrt', openwrtRoutes);
 app.use('/api/weather', weatherRoutes);
 app.use('/api/transport', transportRoutes);
+app.use('/api/devices', devicesRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err.stack);

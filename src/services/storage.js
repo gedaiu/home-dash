@@ -495,6 +495,48 @@ function setTransport(transportConfig) {
   save(config);
 }
 
+const DEVICES_FILE = path.join(DATA_DIR, 'devices.json');
+
+function getDevices() {
+  ensureDataDir();
+  if (!fs.existsSync(DEVICES_FILE)) {
+    return {};
+  }
+  try {
+    return JSON.parse(fs.readFileSync(DEVICES_FILE, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveDevices(devices) {
+  ensureDataDir();
+  fs.writeFileSync(DEVICES_FILE, JSON.stringify(devices, null, 2), 'utf-8');
+}
+
+function getDevice(mac) {
+  const devices = getDevices();
+  return devices[mac] || null;
+}
+
+function setDevice(mac, deviceConfig) {
+  const devices = getDevices();
+  devices[mac] = {
+    ...devices[mac],
+    ...deviceConfig,
+    mac,
+    updatedAt: Date.now()
+  };
+  saveDevices(devices);
+  return devices[mac];
+}
+
+function deleteDevice(mac) {
+  const devices = getDevices();
+  delete devices[mac];
+  saveDevices(devices);
+}
+
 module.exports = {
   load,
   save,
@@ -536,5 +578,9 @@ module.exports = {
   getWeather,
   setWeather,
   getTransport,
-  setTransport
+  setTransport,
+  getDevices,
+  getDevice,
+  setDevice,
+  deleteDevice
 };

@@ -18,6 +18,34 @@ let pingTimer = null;
 let lastPingTime = 0;
 const PING_INTERVAL = 3000;
 
+// Store PM2.5 sensors separately so they persist across room updates
+let cachedPm25Sensors = [];
+
+function mergepm25IntoRooms(rooms) {
+  if (cachedPm25Sensors.length === 0) {
+    return rooms;
+  }
+
+  const result = [...rooms];
+  const sensorsRoomIndex = result.findIndex(r => r.id === 'sensors');
+
+  if (sensorsRoomIndex >= 0) {
+    const sensorsRoom = { ...result[sensorsRoomIndex] };
+    const existingLights = sensorsRoom.lights || [];
+    const nonPm25 = existingLights.filter(s => s.category !== 'pm25');
+    sensorsRoom.lights = [...nonPm25, ...cachedPm25Sensors];
+    result[sensorsRoomIndex] = sensorsRoom;
+  } else {
+    result.push({
+      id: 'sensors',
+      name: 'Sensors',
+      lights: cachedPm25Sensors
+    });
+  }
+
+  return result;
+}
+
 function startPingLoop() {
   if (pingTimer) {
     clearInterval(pingTimer);
@@ -51,7 +79,7 @@ function handlePong(timestamp) {
 function handleMessage(msg) {
   switch (msg.type) {
     case 'rooms':
-      roomsState.value = msg.data;
+      roomsState.value = mergepm25IntoRooms(msg.data);
       break;
     case 'roomba':
       roombaState.value = { configured: true, connected: true, ...msg.data };
@@ -96,6 +124,14 @@ function handleMessage(msg) {
 
     case 'transport':
       transportState.value = msg.data;
+      break;
+
+    case 'pm25_sensors':
+      // Cache PM2.5 sensors and merge into rooms
+      if (msg.data && Array.isArray(msg.data)) {
+        cachedPm25Sensors = msg.data;
+        roomsState.value = mergepm25IntoRooms(roomsState.value || []);
+      }
       break;
 
     case 'log':

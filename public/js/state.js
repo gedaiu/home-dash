@@ -58,6 +58,128 @@ export const resolverState = signal({
   inProgress: false
 });
 
+// Device customizations (keyed by MAC address)
+export const deviceCustomizations = signal({});
+
+// Device types available for selection
+export const DEVICE_TYPES = [
+  { id: 'unknown', label: 'Unknown', icon: 'help-circle' },
+  { id: 'desktop', label: 'Desktop', icon: 'monitor' },
+  { id: 'laptop', label: 'Laptop', icon: 'laptop' },
+  { id: 'phone', label: 'Phone', icon: 'smartphone' },
+  { id: 'tablet', label: 'Tablet', icon: 'tablet' },
+  { id: 'tv', label: 'Smart TV', icon: 'tv' },
+  { id: 'speaker', label: 'Speaker', icon: 'speaker' },
+  { id: 'iot', label: 'IoT Device', icon: 'cpu' },
+  { id: 'camera', label: 'Camera', icon: 'camera' },
+  { id: 'printer', label: 'Printer', icon: 'printer' },
+  { id: 'gaming', label: 'Gaming', icon: 'gamepad-2' },
+  { id: 'ap', label: 'Access Point', icon: 'wifi' },
+  { id: 'router', label: 'Router', icon: 'router' },
+  { id: 'server', label: 'Server', icon: 'server' },
+  { id: 'nas', label: 'NAS', icon: 'hard-drive' }
+];
+
+// Device colors available for selection
+export const DEVICE_COLORS = [
+  { id: 'default', label: 'Default', color: '#00d4aa' },
+  { id: 'blue', label: 'Blue', color: '#4a9eff' },
+  { id: 'purple', label: 'Purple', color: '#a855f7' },
+  { id: 'pink', label: 'Pink', color: '#ec4899' },
+  { id: 'red', label: 'Red', color: '#ef4444' },
+  { id: 'orange', label: 'Orange', color: '#f97316' },
+  { id: 'yellow', label: 'Yellow', color: '#eab308' },
+  { id: 'green', label: 'Green', color: '#22c55e' },
+  { id: 'teal', label: 'Teal', color: '#14b8a6' },
+  { id: 'gray', label: 'Gray', color: '#6b7280' }
+];
+
+export async function loadDeviceCustomizations() {
+  try {
+    const response = await fetch('/api/devices');
+    if (response.ok) {
+      deviceCustomizations.value = await response.json();
+    }
+  } catch (e) {
+    console.error('Failed to load device customizations:', e);
+  }
+}
+
+export async function saveDeviceCustomization(mac, config) {
+  try {
+    const response = await fetch(`/api/devices/${encodeURIComponent(mac)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+    if (response.ok) {
+      const device = await response.json();
+      deviceCustomizations.value = { ...deviceCustomizations.value, [mac]: device };
+      return device;
+    }
+  } catch (e) {
+    console.error('Failed to save device customization:', e);
+  }
+  return null;
+}
+
+// Find device customization by MAC address or hostname
+// Devices with changing MACs can be matched by hostname
+export function findDeviceCustomization(mac, hostname) {
+  // First try exact MAC match
+  if (mac && deviceCustomizations.value[mac]) {
+    return deviceCustomizations.value[mac];
+  }
+
+  // Then try hostname match (for devices with changing MACs)
+  if (hostname) {
+    const normalizedHostname = hostname.toLowerCase();
+    for (const custom of Object.values(deviceCustomizations.value)) {
+      if (custom.hostname && custom.hostname.toLowerCase() === normalizedHostname) {
+        return custom;
+      }
+    }
+  }
+
+  return null;
+}
+
+export function getDeviceCustomization(mac, hostname) {
+  return findDeviceCustomization(mac, hostname);
+}
+
+export function getDeviceIcon(mac, hostname) {
+  const custom = findDeviceCustomization(mac, hostname);
+  if (custom?.type) {
+    const deviceType = DEVICE_TYPES.find(t => t.id === custom.type);
+    if (deviceType) {
+      return deviceType.icon;
+    }
+  }
+  return 'help-circle';
+}
+
+export function getDeviceColor(mac, hostname) {
+  const custom = findDeviceCustomization(mac, hostname);
+  if (custom?.color) {
+    const deviceColor = DEVICE_COLORS.find(c => c.id === custom.color);
+    if (deviceColor) {
+      return deviceColor.color;
+    }
+  }
+  return '#00d4aa';
+}
+
+export function getDeviceDisplayName(mac, hostname, fallback) {
+  const custom = findDeviceCustomization(mac, hostname);
+  return custom?.name || fallback;
+}
+
+export function isDeviceVerified(mac, hostname) {
+  const custom = findDeviceCustomization(mac, hostname);
+  return custom?.verified || false;
+}
+
 // Log management
 export function addLog(message, type = '') {
   const time = new Date().toLocaleTimeString();

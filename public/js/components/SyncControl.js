@@ -51,6 +51,13 @@ export function SyncControl() {
     };
   }, []);
 
+  // Re-create Lucide icons when status changes
+  useEffect(() => {
+    if (window.lucide) {
+      window.lucide.createIcons();
+    }
+  }, [status.running]);
+
   const toggleSync = async () => {
     try {
       if (status.running) {

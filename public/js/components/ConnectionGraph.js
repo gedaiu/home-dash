@@ -1,8 +1,166 @@
 import { html } from 'https://esm.sh/htm@3.1.1/preact';
 import { useEffect, useState, useRef } from 'https://esm.sh/preact@10.19.3/hooks';
 import { effect } from 'https://esm.sh/@preact/signals@1.2.1';
-import { openwrtState, selectedDeviceMac, selectedCountry, selectedDestination, resolverState } from '../state.js';
+import {
+  openwrtState,
+  selectedDeviceMac,
+  selectedCountry,
+  selectedDestination,
+  resolverState,
+  findDeviceCustomization,
+  getDeviceColor,
+  getDeviceDisplayName,
+  isDeviceVerified,
+  DEVICE_TYPES
+} from '../state.js';
 import { sendMessage } from '../websocket-preact.js';
+
+// Get device icon based on MAC and hostname
+function getDeviceIconName(mac, hostname) {
+  const custom = findDeviceCustomization(mac, hostname);
+  const typeId = custom?.type || 'unknown';
+  const deviceType = DEVICE_TYPES.find(t => t.id === typeId);
+  return deviceType?.icon || 'help-circle';
+}
+
+// Simple icon drawing using basic shapes
+function drawDeviceIcon(ctx, x, y, size, iconName, color, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  const s = size;
+
+  switch (iconName) {
+    case 'monitor':
+      ctx.strokeRect(x - s, y - s * 0.7, s * 2, s * 1.2);
+      ctx.beginPath();
+      ctx.moveTo(x - s * 0.3, y + s * 0.5);
+      ctx.lineTo(x + s * 0.3, y + s * 0.5);
+      ctx.moveTo(x, y + s * 0.5);
+      ctx.lineTo(x, y + s * 0.8);
+      ctx.moveTo(x - s * 0.5, y + s * 0.8);
+      ctx.lineTo(x + s * 0.5, y + s * 0.8);
+      ctx.stroke();
+      break;
+
+    case 'laptop':
+      ctx.strokeRect(x - s * 0.8, y - s * 0.5, s * 1.6, s * 0.9);
+      ctx.beginPath();
+      ctx.moveTo(x - s, y + s * 0.5);
+      ctx.lineTo(x + s, y + s * 0.5);
+      ctx.stroke();
+      break;
+
+    case 'smartphone':
+      ctx.strokeRect(x - s * 0.4, y - s * 0.8, s * 0.8, s * 1.6);
+      ctx.beginPath();
+      ctx.arc(x, y + s * 0.5, s * 0.1, 0, Math.PI * 2);
+      ctx.stroke();
+      break;
+
+    case 'tablet':
+      ctx.strokeRect(x - s * 0.6, y - s * 0.8, s * 1.2, s * 1.6);
+      ctx.beginPath();
+      ctx.arc(x, y + s * 0.5, s * 0.1, 0, Math.PI * 2);
+      ctx.stroke();
+      break;
+
+    case 'tv':
+      ctx.strokeRect(x - s, y - s * 0.6, s * 2, s * 1.2);
+      break;
+
+    case 'speaker':
+      ctx.strokeRect(x - s * 0.5, y - s * 0.8, s, s * 1.6);
+      ctx.beginPath();
+      ctx.arc(x, y + s * 0.2, s * 0.25, 0, Math.PI * 2);
+      ctx.stroke();
+      break;
+
+    case 'cpu':
+      ctx.strokeRect(x - s * 0.5, y - s * 0.5, s, s);
+      ctx.beginPath();
+      for (let i = -1; i <= 1; i += 2) {
+        ctx.moveTo(x + i * s * 0.5, y - s * 0.3);
+        ctx.lineTo(x + i * s * 0.7, y - s * 0.3);
+        ctx.moveTo(x + i * s * 0.5, y + s * 0.3);
+        ctx.lineTo(x + i * s * 0.7, y + s * 0.3);
+      }
+      ctx.stroke();
+      break;
+
+    case 'camera':
+      ctx.strokeRect(x - s * 0.7, y - s * 0.4, s * 1.4, s * 0.8);
+      ctx.beginPath();
+      ctx.arc(x, y, s * 0.25, 0, Math.PI * 2);
+      ctx.stroke();
+      break;
+
+    case 'printer':
+      ctx.strokeRect(x - s * 0.7, y - s * 0.3, s * 1.4, s * 0.6);
+      ctx.strokeRect(x - s * 0.5, y - s * 0.7, s, s * 0.4);
+      break;
+
+    case 'gamepad-2':
+      ctx.beginPath();
+      ctx.arc(x - s * 0.4, y, s * 0.35, 0, Math.PI * 2);
+      ctx.arc(x + s * 0.4, y, s * 0.35, 0, Math.PI * 2);
+      ctx.stroke();
+      break;
+
+    case 'wifi':
+      ctx.beginPath();
+      ctx.arc(x, y + s * 0.3, s * 0.8, -Math.PI * 0.8, -Math.PI * 0.2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x, y + s * 0.3, s * 0.5, -Math.PI * 0.8, -Math.PI * 0.2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x, y + s * 0.3, s * 0.15, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+
+    case 'router':
+      ctx.strokeRect(x - s * 0.8, y - s * 0.3, s * 1.6, s * 0.6);
+      ctx.beginPath();
+      ctx.moveTo(x - s * 0.4, y - s * 0.3);
+      ctx.lineTo(x - s * 0.4, y - s * 0.7);
+      ctx.moveTo(x + s * 0.4, y - s * 0.3);
+      ctx.lineTo(x + s * 0.4, y - s * 0.7);
+      ctx.stroke();
+      break;
+
+    case 'server':
+      ctx.strokeRect(x - s * 0.6, y - s * 0.8, s * 1.2, s * 0.5);
+      ctx.strokeRect(x - s * 0.6, y - s * 0.25, s * 1.2, s * 0.5);
+      ctx.strokeRect(x - s * 0.6, y + s * 0.3, s * 1.2, s * 0.5);
+      break;
+
+    case 'hard-drive':
+      ctx.strokeRect(x - s * 0.8, y - s * 0.4, s * 1.6, s * 0.8);
+      ctx.beginPath();
+      ctx.arc(x + s * 0.4, y, s * 0.15, 0, Math.PI * 2);
+      ctx.stroke();
+      break;
+
+    case 'help-circle':
+    default:
+      ctx.beginPath();
+      ctx.arc(x, y, s * 0.7, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.font = `bold ${s}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('?', x, y);
+      break;
+  }
+
+  ctx.restore();
+}
 
 // displayMode: 'orgs' | 'ips' | 'hosts'
 function buildConnectionData(connections, devices, displayMode = 'orgs', maxDestinations = 30) {
@@ -438,31 +596,52 @@ export function ConnectionGraph({ displayMode = 'orgs', maxDestinations = 30 }) 
       const isSelected = selectedMac === device.mac;
       const isConnectedToSelectedCountry = selectedCountryCode && device.countries.some(c => c.code === selectedCountryCode);
       const isHighlighted = isSelected || isConnectedToSelectedCountry;
+      const deviceColor = getDeviceColor(device.mac, device.hostname);
+      const verified = isDeviceVerified(device.mac, device.hostname);
+      const displayName = getDeviceDisplayName(device.mac, device.hostname, device.hostname);
 
       let alpha = 1;
       if (selectedCountryCode && !isConnectedToSelectedCountry) {
         alpha = 0.3;
       }
 
-      const radius = isHighlighted ? 14 : 10;
+      const radius = isHighlighted ? 16 : 12;
+      const highlightColor = isHighlighted ? '#fff' : deviceColor;
+      const fillColor = device.online ? deviceColor : '#4a4a4a';
 
+      // Draw outer ring for verified devices
+      if (verified) {
+        ctx.beginPath();
+        ctx.arc(device.x, device.y, radius + 3, 0, Math.PI * 2);
+        ctx.globalAlpha = alpha * 0.5;
+        ctx.strokeStyle = deviceColor;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+
+      // Draw device circle
       ctx.beginPath();
       ctx.arc(device.x, device.y, radius, 0, Math.PI * 2);
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = isHighlighted ? '#00ff88' : (device.online ? '#00d4aa' : '#4a4a4a');
+      ctx.fillStyle = isHighlighted ? fillColor : 'rgba(10, 10, 10, 0.9)';
       ctx.fill();
-      ctx.strokeStyle = isHighlighted ? '#00ff88' : '#1a1a1a';
+      ctx.strokeStyle = fillColor;
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.globalAlpha = 1;
 
-      // Label
+      // Draw device icon
+      const iconName = getDeviceIconName(device.mac, device.hostname);
+      drawDeviceIcon(ctx, device.x, device.y, radius * 0.6, iconName, highlightColor, alpha);
+
+      // Label - use custom display name if set
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = isHighlighted ? '#00ff88' : '#00d4aa';
-      ctx.font = isHighlighted ? 'bold 12px monospace' : '11px monospace';
+      ctx.fillStyle = highlightColor;
+      ctx.font = isHighlighted ? 'bold 11px monospace' : '10px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.fillText(device.hostname, device.x, device.y + radius + 4);
+      ctx.fillText(displayName, device.x, device.y + radius + 6);
       ctx.globalAlpha = 1;
     });
 
