@@ -262,12 +262,14 @@ async function tryRestoreSession(index) {
     log(index, 'Session restore failed - no status received, will do full sync');
     state.connected = false;
     state.counter = null;
+    storage.setAirPurifierCounter(index, null);
     coap.stopObserving(`${baseUrl}/sys/dev/status`);
     return false;
   } catch (err) {
     logError(index, 'Session restore failed:', err);
     state.connected = false;
     state.counter = null;
+    storage.setAirPurifierCounter(index, null);
     return false;
   }
 }

@@ -1,15 +1,14 @@
 import { html } from 'https://esm.sh/htm@3.1.1/preact';
 import { useEffect, useState, useRef } from 'https://esm.sh/preact@10.19.3/hooks';
 import { effect } from 'https://esm.sh/@preact/signals@1.2.1';
-import { openwrtState, selectedDeviceMac, resolverState } from '../state.js';
+import { openwrtState, selectedDeviceMac, selectedCountry, selectedDestination, resolverState } from '../state.js';
 import { sendMessage } from '../websocket-preact.js';
-
-const DEST_LIMITS = [30, 50, 100, 200];
 
 // displayMode: 'orgs' | 'ips' | 'hosts'
 function buildConnectionData(connections, devices, displayMode = 'orgs', maxDestinations = 30) {
   const deviceMap = new Map();
   const destinationMap = new Map();
+  const countryMap = new Map();
 
   devices.forEach(device => {
     deviceMap.set(device.mac, {
@@ -19,7 +18,8 @@ function buildConnectionData(connections, devices, displayMode = 'orgs', maxDest
       online: device.online,
       totalBytes: 0,
       connectionCount: 0,
-      destinations: new Map()
+      destinations: new Map(),
+      countries: new Map()
     });
   });
 
@@ -36,24 +36,24 @@ function buildConnectionData(connections, devices, displayMode = 'orgs', maxDest
         online: true,
         totalBytes: 0,
         connectionCount: 0,
-        destinations: new Map()
+        destinations: new Map(),
+        countries: new Map()
       });
     }
 
     const device = deviceMap.get(conn.srcMac);
     const org = conn.enriched.org || conn.enriched.asName || conn.enriched.isp;
-    const country = conn.enriched.country;
+    const country = conn.enriched.country || 'Unknown';
     const dstIP = conn.dst_ip;
     const dstHostname = conn.enriched.hostname;
-    const countryPrefix = country ? `[${country}] ` : '';
 
     let dstLabel;
     if (displayMode === 'ips') {
-      dstLabel = countryPrefix + dstIP;
+      dstLabel = dstIP;
     } else if (displayMode === 'hosts') {
-      dstLabel = countryPrefix + (dstHostname || dstIP);
+      dstLabel = dstHostname || dstIP;
     } else {
-      dstLabel = countryPrefix + (org || dstIP);
+      dstLabel = org || dstIP;
     }
 
     const bytes = conn.bytes || 0;
@@ -61,6 +61,15 @@ function buildConnectionData(connections, devices, displayMode = 'orgs', maxDest
     device.totalBytes += bytes;
     device.connectionCount += 1;
 
+    // Track device's countries
+    if (!device.countries.has(country)) {
+      device.countries.set(country, { code: country, bytes: 0, count: 0 });
+    }
+    const deviceCountry = device.countries.get(country);
+    deviceCountry.bytes += bytes;
+    deviceCountry.count += 1;
+
+    // Track device's destinations
     if (!device.destinations.has(dstLabel)) {
       device.destinations.set(dstLabel, { label: dstLabel, country, org, ip: dstIP, hostname: dstHostname, bytes: 0, count: 0 });
     }
@@ -68,30 +77,40 @@ function buildConnectionData(connections, devices, displayMode = 'orgs', maxDest
     dest.bytes += bytes;
     dest.count += 1;
 
+    // Track global destinations
     if (!destinationMap.has(dstLabel)) {
       destinationMap.set(dstLabel, { label: dstLabel, country, org, ip: dstIP, hostname: dstHostname, totalBytes: 0, devices: new Set() });
     }
     const destGlobal = destinationMap.get(dstLabel);
     destGlobal.totalBytes += bytes;
     destGlobal.devices.add(conn.srcMac);
+
+    // Track global countries
+    if (!countryMap.has(country)) {
+      countryMap.set(country, { code: country, totalBytes: 0, devices: new Set(), destinations: new Set() });
+    }
+    const countryData = countryMap.get(country);
+    countryData.totalBytes += bytes;
+    countryData.devices.add(conn.srcMac);
+    countryData.destinations.add(dstLabel);
   });
 
   const deviceList = Array.from(deviceMap.values())
-    .map(d => ({ ...d, destinations: Array.from(d.destinations.values()).sort((a, b) => b.bytes - a.bytes) }))
+    .map(d => ({
+      ...d,
+      destinations: Array.from(d.destinations.values()).sort((a, b) => b.bytes - a.bytes),
+      countries: Array.from(d.countries.values()).sort((a, b) => b.bytes - a.bytes)
+    }))
     .sort((a, b) => b.totalBytes - a.totalBytes);
 
   const destinationList = Array.from(destinationMap.values())
     .sort((a, b) => b.totalBytes - a.totalBytes)
     .slice(0, maxDestinations);
 
-  return { devices: deviceList, destinations: destinationList };
-}
+  const countryList = Array.from(countryMap.values())
+    .sort((a, b) => b.totalBytes - a.totalBytes);
 
-function formatBytes(bytes) {
-  if (!bytes || bytes === 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
+  return { devices: deviceList, destinations: destinationList, countries: countryList };
 }
 
 function getCountryColor(country) {
@@ -103,18 +122,15 @@ function getCountryColor(country) {
   return colors[country] || '#cc7000';
 }
 
-const DISPLAY_MODES = ['orgs', 'hosts', 'ips'];
-const DISPLAY_MODE_LABELS = { orgs: 'Orgs', hosts: 'Hosts', ips: 'IPs' };
-
-export function ConnectionGraph() {
-  const [data, setData] = useState({ devices: [], destinations: [] });
+export function ConnectionGraph({ displayMode = 'orgs', maxDestinations = 30 }) {
+  const [data, setData] = useState({ devices: [], destinations: [], countries: [] });
   const [selectedMac, setSelectedMac] = useState(null);
+  const [selectedCountryCode, setSelectedCountryCode] = useState(null);
   const [selectedDest, setSelectedDest] = useState(null);
+  const [hoveredCountry, setHoveredCountry] = useState(null);
   const [hoveredDest, setHoveredDest] = useState(null);
-  const [displayMode, setDisplayMode] = useState('orgs');
   const [resolver, setResolver] = useState({ total: 0, resolved: 0, pending: 0, inProgress: false });
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-  const [maxDests, setMaxDests] = useState(30);
   const canvasRef = useRef(null);
   const lastStateRef = useRef(null);
 
@@ -147,30 +163,18 @@ export function ConnectionGraph() {
       const now = Date.now();
       if (now - lastUpdate < 3000) return;
       lastUpdate = now;
-      setData(buildConnectionData(state.connections || [], state.devices || [], displayMode, maxDests));
+      setData(buildConnectionData(state.connections || [], state.devices || [], displayMode, maxDestinations));
     });
     return dispose;
-  }, [displayMode, maxDests]);
+  }, [displayMode, maxDestinations]);
 
-  const cycleDisplayMode = () => {
-    const currentIndex = DISPLAY_MODES.indexOf(displayMode);
-    const nextIndex = (currentIndex + 1) % DISPLAY_MODES.length;
-    const newMode = DISPLAY_MODES[nextIndex];
-    setDisplayMode(newMode);
+  // Reset destination selection when display mode changes
+  useEffect(() => {
     setSelectedDest(null);
-    if (lastStateRef.current) {
-      setData(buildConnectionData(lastStateRef.current.connections || [], lastStateRef.current.devices || [], newMode, maxDests));
-    }
-  };
+  }, [displayMode]);
 
   const startResolver = () => {
     sendMessage('resolver:start');
-  };
-
-  const cycleDestLimit = () => {
-    const currentIndex = DEST_LIMITS.indexOf(maxDests);
-    const nextIndex = (currentIndex + 1) % DEST_LIMITS.length;
-    setMaxDests(DEST_LIMITS[nextIndex]);
   };
 
   useEffect(() => {
@@ -179,8 +183,18 @@ export function ConnectionGraph() {
   }, []);
 
   useEffect(() => {
+    const dispose = effect(() => setSelectedCountryCode(selectedCountry.value));
+    return dispose;
+  }, []);
+
+  useEffect(() => {
+    const dispose = effect(() => setSelectedDest(selectedDestination.value));
+    return dispose;
+  }, []);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || data.devices.length === 0) return;
+    if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
     const rect = canvas.parentElement.getBoundingClientRect();
@@ -194,6 +208,12 @@ export function ConnectionGraph() {
     canvas.style.height = height + 'px';
     ctx.scale(dpr, dpr);
 
+    // If no data, just clear the canvas and return
+    if (data.devices.length === 0) {
+      ctx.clearRect(0, 0, width, height);
+      return;
+    }
+
     const centerX = width / 2;
     const centerY = height / 2;
     const minDimension = Math.min(width, height);
@@ -204,7 +224,8 @@ export function ConnectionGraph() {
     }
 
     const innerRadius = minDimension * 0.15;
-    const outerRadius = minDimension * 0.42;
+    const countryRadius = minDimension * 0.35;
+    const outerRadius = minDimension * 0.45;
 
     // Clear
     ctx.fillStyle = '#0a0a0a';
@@ -213,23 +234,26 @@ export function ConnectionGraph() {
     // Draw grid circles
     ctx.strokeStyle = 'rgba(255, 140, 0, 0.1)';
     ctx.lineWidth = 1;
-    const ringStep = (outerRadius - innerRadius) / 3;
-    if (ringStep > 0) {
-      for (let r = innerRadius; r <= outerRadius; r += ringStep) {
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
-        ctx.stroke();
-      }
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, innerRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, countryRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    if (selectedCountryCode) {
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, outerRadius, 0, Math.PI * 2);
+      ctx.stroke();
     }
 
-    // Position destinations around outer ring
-    const destinations = data.destinations;
-    const destPositions = destinations.map((dest, i) => {
-      const angle = (i / destinations.length) * Math.PI * 2 - Math.PI / 2;
+    // Position countries around country ring
+    const countries = data.countries;
+    const countryPositions = countries.map((country, i) => {
+      const angle = (i / countries.length) * Math.PI * 2 - Math.PI / 2;
       return {
-        ...dest,
-        x: centerX + Math.cos(angle) * outerRadius,
-        y: centerY + Math.sin(angle) * outerRadius,
+        ...country,
+        x: centerX + Math.cos(angle) * countryRadius,
+        y: centerY + Math.sin(angle) * countryRadius,
         angle
       };
     });
@@ -246,61 +270,101 @@ export function ConnectionGraph() {
       };
     });
 
-    // Draw connections
+    // Position destinations (only when a country is selected)
+    // Destinations are positioned in an arc around their parent country's angle
+    let destPositions = [];
+    if (selectedCountryCode) {
+      const selectedCountryPos = countryPositions.find(c => c.code === selectedCountryCode);
+      if (selectedCountryPos) {
+        const countryDests = data.destinations
+          .filter(d => d.country === selectedCountryCode)
+          .sort((a, b) => b.totalBytes - a.totalBytes);
+
+        const destCount = countryDests.length;
+        const maxSpread = Math.PI * 0.8;
+        const spread = Math.min(maxSpread, destCount * 0.15);
+
+        destPositions = countryDests.map((dest, i) => {
+          const offsetAngle = destCount === 1
+            ? 0
+            : (i / (destCount - 1) - 0.5) * spread;
+          const angle = selectedCountryPos.angle + offsetAngle;
+          return {
+            ...dest,
+            x: centerX + Math.cos(angle) * outerRadius,
+            y: centerY + Math.sin(angle) * outerRadius,
+            angle
+          };
+        });
+      }
+    }
+
+    // Draw device to country connections
     devicePositions.forEach(device => {
       const isDeviceSelected = selectedMac === device.mac;
 
-      device.destinations.forEach(dest => {
-        const destPos = destPositions.find(d => d.label === dest.label);
-        if (!destPos) return;
+      device.countries.forEach(countryData => {
+        const countryPos = countryPositions.find(c => c.code === countryData.code);
+        if (!countryPos) return;
 
-        const isDestSelected = selectedDest === dest.label;
-        const isHighlighted = isDeviceSelected || isDestSelected || hoveredDest === dest.label;
+        const isCountrySelected = selectedCountryCode === countryData.code;
+        const isCountryHovered = hoveredCountry === countryData.code;
+        const isHighlighted = isDeviceSelected || isCountrySelected || isCountryHovered;
 
         let alpha;
         if (selectedMac) {
           alpha = isDeviceSelected ? 0.6 : 0.05;
-        } else if (selectedDest) {
-          alpha = isDestSelected ? 0.6 : 0.05;
-        } else if (hoveredDest) {
-          alpha = hoveredDest === dest.label ? 0.6 : 0.05;
+        } else if (selectedCountryCode) {
+          alpha = isCountrySelected ? 0.6 : 0.05;
+        } else if (hoveredCountry) {
+          alpha = isCountryHovered ? 0.6 : 0.05;
         } else {
           alpha = 0.2;
         }
 
-        const lineWidth = isHighlighted ? Math.min(1 + Math.log2(dest.bytes / 1000 + 1) * 0.5, 4) : 1;
+        const lineWidth = isHighlighted ? Math.min(1 + Math.log2(countryData.bytes / 1000 + 1) * 0.5, 4) : 1;
 
         ctx.beginPath();
-        ctx.strokeStyle = isHighlighted ? getCountryColor(dest.country) : `rgba(255, 140, 0, ${alpha})`;
+        ctx.strokeStyle = isHighlighted ? getCountryColor(countryData.code) : `rgba(255, 140, 0, ${alpha})`;
         ctx.lineWidth = lineWidth;
 
-        // Curved line
-        const midX = centerX;
-        const midY = centerY;
+        // Curved line through center
         ctx.moveTo(device.x, device.y);
-        ctx.quadraticCurveTo(midX, midY, destPos.x, destPos.y);
+        ctx.quadraticCurveTo(centerX, centerY, countryPos.x, countryPos.y);
         ctx.stroke();
       });
     });
 
-    // Draw destination nodes
+    // Draw country to destination connections (only when country is selected)
+    if (selectedCountryCode && destPositions.length > 0) {
+      const countryPos = countryPositions.find(c => c.code === selectedCountryCode);
+      if (countryPos) {
+        destPositions.forEach(dest => {
+          const isDestSelected = selectedDest === dest.label;
+          const isDestHovered = hoveredDest === dest.label;
+          const isHighlighted = isDestSelected || isDestHovered;
+
+          const alpha = isHighlighted ? 0.8 : 0.4;
+          const lineWidth = isHighlighted ? 2 : 1;
+
+          ctx.beginPath();
+          ctx.strokeStyle = isHighlighted ? getCountryColor(dest.country) : `rgba(255, 140, 0, ${alpha})`;
+          ctx.lineWidth = lineWidth;
+          ctx.moveTo(countryPos.x, countryPos.y);
+          ctx.lineTo(dest.x, dest.y);
+          ctx.stroke();
+        });
+      }
+    }
+
+    // Draw destination nodes (only when country is selected)
     destPositions.forEach(dest => {
       const isHovered = hoveredDest === dest.label;
       const isSelected = selectedDest === dest.label;
-      const hasConnectionToSelectedDevice = selectedMac ? devices.find(d => d.mac === selectedMac)?.destinations.some(dd => dd.label === dest.label) : true;
 
-      let alpha;
-      if (selectedMac) {
-        alpha = hasConnectionToSelectedDevice ? 1 : 0.2;
-      } else if (selectedDest) {
-        alpha = isSelected ? 1 : 0.2;
-      } else if (hoveredDest) {
-        alpha = isHovered ? 1 : 0.2;
-      } else {
-        alpha = 0.8;
-      }
-
-      const radius = (isHovered || isSelected) ? 12 : 6 + Math.min(Math.log2(dest.devices.size + 1) * 2, 6);
+      const alpha = isHovered || isSelected ? 1 : 0.8;
+      const baseRadius = 4 + Math.min(Math.log2(dest.totalBytes / 1000 + 1) * 1.5, 6);
+      const radius = (isHovered || isSelected) ? 10 : baseRadius;
 
       ctx.beginPath();
       ctx.arc(dest.x, dest.y, radius, 0, Math.PI * 2);
@@ -309,34 +373,74 @@ export function ConnectionGraph() {
       ctx.fill();
       ctx.globalAlpha = 1;
 
-      // Highlight ring for selected destination
       if (isSelected) {
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
         ctx.stroke();
       }
 
-      // Label - show when hovered, selected, connected to selected device, or nothing selected
-      const showLabel = isHovered || isSelected || hasConnectionToSelectedDevice || (!selectedMac && !selectedDest && !hoveredDest);
-      if (showLabel) {
-        ctx.fillStyle = `rgba(255, 140, 0, ${alpha})`;
-        ctx.font = (isSelected ? 'bold ' : '') + '11px monospace';
-        ctx.textAlign = dest.x > centerX ? 'left' : 'right';
-        ctx.textBaseline = 'middle';
-        const labelX = dest.x + (dest.x > centerX ? 14 : -14);
-        const label = dest.label.length > 20 ? dest.label.substring(0, 18) + '...' : dest.label;
-        ctx.fillText(label, labelX, dest.y);
+      // Label
+      ctx.fillStyle = `rgba(255, 140, 0, ${alpha})`;
+      ctx.font = (isSelected ? 'bold ' : '') + '10px monospace';
+      ctx.textAlign = dest.x > centerX ? 'left' : 'right';
+      ctx.textBaseline = 'middle';
+      const labelX = dest.x + (dest.x > centerX ? 12 : -12);
+      const label = dest.label.length > 18 ? dest.label.substring(0, 16) + '...' : dest.label;
+      ctx.fillText(label, labelX, dest.y);
+    });
+
+    // Draw country nodes
+    countryPositions.forEach(country => {
+      const isHovered = hoveredCountry === country.code;
+      const isSelected = selectedCountryCode === country.code;
+      const hasConnectionToSelectedDevice = selectedMac
+        ? devices.find(d => d.mac === selectedMac)?.countries.some(c => c.code === country.code)
+        : true;
+
+      let alpha;
+      if (selectedMac) {
+        alpha = hasConnectionToSelectedDevice ? 1 : 0.2;
+      } else if (selectedCountryCode) {
+        alpha = isSelected ? 1 : 0.3;
+      } else if (hoveredCountry) {
+        alpha = isHovered ? 1 : 0.2;
+      } else {
+        alpha = 0.9;
       }
+
+      const destCount = country.destinations.size;
+      const radius = (isHovered || isSelected) ? 14 : 6 + Math.min(Math.log2(destCount + 1) * 3, 10);
+
+      ctx.beginPath();
+      ctx.arc(country.x, country.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = getCountryColor(country.code);
+      ctx.globalAlpha = alpha;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      if (isSelected) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      // Country label
+      ctx.fillStyle = `rgba(255, 140, 0, ${alpha})`;
+      ctx.font = (isSelected ? 'bold ' : '') + '11px monospace';
+      ctx.textAlign = country.x > centerX ? 'left' : 'right';
+      ctx.textBaseline = 'middle';
+      const labelX = country.x + (country.x > centerX ? radius + 6 : -radius - 6);
+      ctx.fillText(country.code, labelX, country.y);
     });
 
     // Draw device nodes
     devicePositions.forEach(device => {
       const isSelected = selectedMac === device.mac;
-      const isConnectedToSelectedDest = selectedDest && device.destinations.some(d => d.label === selectedDest);
-      const isHighlighted = isSelected || isConnectedToSelectedDest;
+      const isConnectedToSelectedCountry = selectedCountryCode && device.countries.some(c => c.code === selectedCountryCode);
+      const isHighlighted = isSelected || isConnectedToSelectedCountry;
 
       let alpha = 1;
-      if (selectedDest && !isConnectedToSelectedDest) {
+      if (selectedCountryCode && !isConnectedToSelectedCountry) {
         alpha = 0.3;
       }
 
@@ -364,9 +468,10 @@ export function ConnectionGraph() {
 
     // Store positions for click detection
     canvas._devicePositions = devicePositions;
+    canvas._countryPositions = countryPositions;
     canvas._destPositions = destPositions;
 
-  }, [data, selectedMac, selectedDest, hoveredDest, dimensions]);
+  }, [data, selectedMac, selectedCountryCode, selectedDest, hoveredCountry, hoveredDest, dimensions]);
 
   const handleCanvasClick = (e) => {
     const canvas = canvasRef.current;
@@ -384,18 +489,38 @@ export function ConnectionGraph() {
         const newMac = selectedMac === device.mac ? null : device.mac;
         setSelectedMac(newMac);
         selectedDeviceMac.value = newMac;
+        setSelectedCountryCode(null);
+        selectedCountry.value = null;
         setSelectedDest(null);
+        selectedDestination.value = null;
         return;
       }
     }
 
-    // Check destination clicks
+    // Check country clicks
+    for (const country of canvas._countryPositions || []) {
+      const dx = x - country.x;
+      const dy = y - country.y;
+      if (dx * dx + dy * dy < 200) {
+        const newCountry = selectedCountryCode === country.code ? null : country.code;
+        setSelectedCountryCode(newCountry);
+        selectedCountry.value = newCountry;
+        setSelectedMac(null);
+        selectedDeviceMac.value = null;
+        setSelectedDest(null);
+        selectedDestination.value = null;
+        return;
+      }
+    }
+
+    // Check destination clicks (only when country is selected)
     for (const dest of canvas._destPositions || []) {
       const dx = x - dest.x;
       const dy = y - dest.y;
       if (dx * dx + dy * dy < 200) {
         const newDest = selectedDest === dest.label ? null : dest.label;
         setSelectedDest(newDest);
+        selectedDestination.value = newDest;
         setSelectedMac(null);
         selectedDeviceMac.value = null;
         return;
@@ -404,42 +529,50 @@ export function ConnectionGraph() {
 
     // Click on empty space clears selection
     setSelectedMac(null);
+    setSelectedCountryCode(null);
     setSelectedDest(null);
     selectedDeviceMac.value = null;
+    selectedCountry.value = null;
+    selectedDestination.value = null;
   };
 
   const handleCanvasMove = (e) => {
     const canvas = canvasRef.current;
-    if (!canvas._destPositions) return;
+    if (!canvas._countryPositions) return;
 
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    for (const dest of canvas._destPositions) {
-      const dx = x - dest.x;
-      const dy = y - dest.y;
+    // Check country hover
+    for (const country of canvas._countryPositions) {
+      const dx = x - country.x;
+      const dy = y - country.y;
       if (dx * dx + dy * dy < 200) {
-        if (hoveredDest !== dest.label) setHoveredDest(dest.label);
+        if (hoveredCountry !== country.code) {
+          setHoveredCountry(country.code);
+          setHoveredDest(null);
+        }
         return;
       }
     }
 
+    // Check destination hover (when country is selected)
+    for (const dest of canvas._destPositions || []) {
+      const dx = x - dest.x;
+      const dy = y - dest.y;
+      if (dx * dx + dy * dy < 200) {
+        if (hoveredDest !== dest.label) {
+          setHoveredDest(dest.label);
+          setHoveredCountry(null);
+        }
+        return;
+      }
+    }
+
+    if (hoveredCountry) setHoveredCountry(null);
     if (hoveredDest) setHoveredDest(null);
   };
-
-  const selectedDevice = selectedMac ? data.devices.find(d => d.mac === selectedMac) : null;
-  const selectedDestination = selectedDest ? data.destinations.find(d => d.label === selectedDest) : null;
-
-  // Get connected devices for selected destination
-  const connectedDevices = selectedDestination
-    ? data.devices.filter(d => d.destinations.some(dest => dest.label === selectedDest))
-        .map(d => ({
-          ...d,
-          bytesToDest: d.destinations.find(dest => dest.label === selectedDest)?.bytes || 0
-        }))
-        .sort((a, b) => b.bytesToDest - a.bytesToDest)
-    : [];
 
   const hasData = data.devices.length > 0;
 
@@ -450,16 +583,10 @@ export function ConnectionGraph() {
           ref=${canvasRef}
           onClick=${handleCanvasClick}
           onMouseMove=${handleCanvasMove}
-          onMouseLeave=${() => setHoveredDest(null)}
+          onMouseLeave=${() => { setHoveredDest(null); setHoveredCountry(null); }}
         />
-        <div class="radial-toggle">
-          <button class="toggle-btn" onClick=${cycleDisplayMode}>
-            ${DISPLAY_MODE_LABELS[displayMode]}
-          </button>
-          <button class="toggle-btn" onClick=${cycleDestLimit} title="Max destinations shown">
-            ${maxDests}
-          </button>
-          ${displayMode === 'hosts' && html`
+        ${displayMode === 'hosts' && html`
+          <div class="radial-toggle">
             <button
               class="toggle-btn resolver-btn ${resolver.inProgress ? 'resolving' : ''}"
               onClick=${startResolver}
@@ -469,78 +596,24 @@ export function ConnectionGraph() {
                 ? `Resolving ${resolver.resolved}/${resolver.total}`
                 : 'Resolve'}
             </button>
-          `}
-        </div>
+          </div>
+        `}
         ${!hasData && html`
-          <div class="radial-empty">
-            <span>Waiting for connection data...</span>
+          <div class="radial-loading">
+            <div class="loading-orbits">
+              <div class="orbit orbit-1"></div>
+              <div class="orbit orbit-2"></div>
+              <div class="orbit orbit-3"></div>
+              <div class="node node-center"></div>
+              <div class="node node-1"></div>
+              <div class="node node-2"></div>
+              <div class="node node-3"></div>
+            </div>
+            <span class="loading-text">Scanning network...</span>
           </div>
         `}
       </div>
 
-      ${selectedDevice && html`
-        <div class="radial-details">
-          <div class="radial-details-header">
-            <span class="device-name">${selectedDevice.hostname}</span>
-            <button class="close-btn" onClick=${() => { setSelectedMac(null); selectedDeviceMac.value = null; }}>x</button>
-          </div>
-          <div class="radial-details-info">
-            <span class="device-ip">${selectedDevice.ip}</span>
-            <span class="device-mac">${selectedDevice.mac}</span>
-          </div>
-          <div class="radial-details-stats">
-            <div class="stat">
-              <span class="stat-value">${formatBytes(selectedDevice.totalBytes)}</span>
-              <span class="stat-label">traffic</span>
-            </div>
-            <div class="stat">
-              <span class="stat-value">${selectedDevice.connectionCount}</span>
-              <span class="stat-label">connections</span>
-            </div>
-          </div>
-          <div class="radial-destinations">
-            ${selectedDevice.destinations.slice(0, 8).map(dest => html`
-              <div class="radial-dest-row">
-                <span class="dest-color" style="background: ${getCountryColor(dest.country)}"></span>
-                <span class="dest-label">${dest.label}</span>
-                <span class="dest-bytes">${formatBytes(dest.bytes)}</span>
-              </div>
-            `)}
-          </div>
-        </div>
-      `}
-
-      ${selectedDestination && html`
-        <div class="radial-details">
-          <div class="radial-details-header">
-            <span class="device-name" style="color: ${getCountryColor(selectedDestination.country)}">${selectedDestination.label}</span>
-            <button class="close-btn" onClick=${() => setSelectedDest(null)}>x</button>
-          </div>
-          <div class="radial-details-info">
-            <span class="device-ip">${selectedDestination.country || 'Unknown'}</span>
-            <span class="device-mac">${selectedDestination.org || ''}</span>
-          </div>
-          <div class="radial-details-stats">
-            <div class="stat">
-              <span class="stat-value">${formatBytes(selectedDestination.totalBytes)}</span>
-              <span class="stat-label">traffic</span>
-            </div>
-            <div class="stat">
-              <span class="stat-value">${connectedDevices.length}</span>
-              <span class="stat-label">devices</span>
-            </div>
-          </div>
-          <div class="radial-destinations">
-            ${connectedDevices.slice(0, 8).map(device => html`
-              <div class="radial-dest-row">
-                <span class="dest-color" style="background: #00d4aa"></span>
-                <span class="dest-label">${device.hostname}</span>
-                <span class="dest-bytes">${formatBytes(device.bytesToDest)}</span>
-              </div>
-            `)}
-          </div>
-        </div>
-      `}
     </div>
   `;
 }

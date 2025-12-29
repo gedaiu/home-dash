@@ -43,6 +43,8 @@ export const openwrtState = signal({
 });
 
 export const selectedDeviceMac = signal(null);
+export const selectedCountry = signal(null);
+export const selectedDestination = signal(null);
 
 // Outside page states
 export const weatherState = signal(null);
@@ -78,6 +80,12 @@ export function getPanelDisplayName(panelKey, defaultName) {
 
 export function setPanelDisplayName(panelKey, name) {
   panelNames.value = { ...panelNames.value, [panelKey]: name };
+  localStorage.setItem('panelNames', JSON.stringify(panelNames.value));
+}
+
+export function deletePanelDisplayName(panelKey) {
+  const { [panelKey]: _, ...rest } = panelNames.value;
+  panelNames.value = rest;
   localStorage.setItem('panelNames', JSON.stringify(panelNames.value));
 }
 

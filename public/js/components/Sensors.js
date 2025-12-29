@@ -1,7 +1,7 @@
 import { html } from 'https://esm.sh/htm@3.1.1/preact';
-import { useState, useEffect } from 'https://esm.sh/preact@10.19.3/hooks';
+import { useState, useEffect, useRef } from 'https://esm.sh/preact@10.19.3/hooks';
 import { effect } from 'https://esm.sh/@preact/signals@1.2.1';
-import { roomsState, getPanelDisplayName } from '../state.js';
+import { roomsState, getPanelDisplayName, setPanelDisplayName, deletePanelDisplayName } from '../state.js';
 
 const CATEGORY_ICONS = {
   motion: 'scan-eye',
@@ -79,6 +79,45 @@ function SensorPanel({ sensor }) {
   const typeClass = `sensor-${sensor.category}`;
   const panelKey = `sensor:${sensor.storageId || sensor.id}`;
   const displayName = getPanelDisplayName(panelKey, sensor.name);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(displayName);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const handleDoubleClick = (e) => {
+    e.stopPropagation();
+    setEditValue(displayName);
+    setIsEditing(true);
+  };
+
+  const handleSave = () => {
+    const newName = editValue.trim();
+    if (newName && newName !== sensor.name) {
+      setPanelDisplayName(panelKey, newName);
+    } else {
+      deletePanelDisplayName(panelKey);
+    }
+    setIsEditing(false);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSave();
+    } else if (e.key === 'Escape') {
+      setIsEditing(false);
+    }
+  };
+
+  const handleBlur = () => {
+    setIsEditing(false);
+  };
 
   let value = '--';
   let unit = '';
@@ -134,11 +173,23 @@ function SensorPanel({ sensor }) {
     bottomContent = html`<div class="switch-lastpress"><span>${timeAgo || 'No presses recorded'}</span></div>`;
   }
 
+  const titleContent = isEditing
+    ? html`<input
+        ref=${inputRef}
+        type="text"
+        class="panel-title-input"
+        value=${editValue}
+        onInput=${(e) => setEditValue(e.target.value)}
+        onKeyDown=${handleKeyDown}
+        onBlur=${handleBlur}
+      />`
+    : html`<span class="panel-title editable" onDblClick=${handleDoubleClick} title="Double-click to rename">${displayName}</span>`;
+
   return html`
     <section class="sensor-panel ${typeClass} ${activeClass}" data-panel-key=${panelKey} data-default-name=${sensor.name}>
       <div class="sensor-header">
         <i data-lucide=${icon}></i>
-        <span class="panel-title">${displayName}</span>
+        ${titleContent}
       </div>
       <div class="sensor-content">
         <div class="sensor-main">
