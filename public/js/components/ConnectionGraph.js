@@ -1006,19 +1006,17 @@ export function ConnectionGraph({ displayMode = 'orgs', showIdleDevices = true }
           onMouseMove=${handleCanvasMove}
           onMouseLeave=${() => { setHoveredDest(null); setHoveredCountry(null); setHoveredDevice(null); }}
         />
-        ${displayMode === 'hosts' && html`
-          <div class="radial-toggle">
-            <button
-              class="toggle-btn resolver-btn ${resolver.inProgress ? 'resolving' : ''}"
-              onClick=${startResolver}
-              disabled=${resolver.inProgress}
-            >
-              ${resolver.inProgress
-                ? `Resolving ${resolver.resolved}/${resolver.total}`
-                : 'Resolve'}
-            </button>
-          </div>
-        `}
+        <div class="radial-toggle">
+          <button
+            class="toggle-btn resolver-btn ${resolver.inProgress ? 'resolving' : ''}"
+            onClick=${startResolver}
+            disabled=${resolver.inProgress}
+          >
+            ${resolver.inProgress
+              ? `Resolving ${resolver.resolved}/${resolver.total}`
+              : 'Resolve Hosts'}
+          </button>
+        </div>
         ${!hasData && html`
           <div class="radial-loading">
             <div class="loading-orbits">
