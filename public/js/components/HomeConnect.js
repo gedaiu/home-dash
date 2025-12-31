@@ -102,7 +102,14 @@ function HomeConnectDevice({ device, onRefresh }) {
 
   const warnings = status.warnings || [];
   const saltLow = warnings.includes('salt_low');
+  const saltEmpty = warnings.includes('salt_empty');
   const rinseAidLow = warnings.includes('rinse_aid_low');
+  const rinseAidEmpty = warnings.includes('rinse_aid_empty');
+
+  const saltStatus = saltEmpty ? 'EMPTY' : (saltLow ? 'LOW' : 'OK');
+  const saltClass = saltEmpty ? 'error' : (saltLow ? 'warning' : 'online');
+  const rinseAidStatus = rinseAidEmpty ? 'EMPTY' : (rinseAidLow ? 'LOW' : 'OK');
+  const rinseAidClass = rinseAidEmpty ? 'error' : (rinseAidLow ? 'warning' : 'online');
 
   const hasProgress = prog && (prog.progress !== null && prog.progress !== undefined);
   const hasRemainingTime = remainingTime > 0;
@@ -123,11 +130,11 @@ function HomeConnectDevice({ device, onRefresh }) {
         </div>
         <div class="info-row">
           <span class="label">SALT:</span>
-          <${StatusBadge} status=${saltLow ? 'LOW' : 'OK'} className=${saltLow ? 'warning' : 'online'} />
+          <${StatusBadge} status=${saltStatus} className=${saltClass} />
         </div>
         <div class="info-row">
           <span class="label">RINSE AID:</span>
-          <${StatusBadge} status=${rinseAidLow ? 'LOW' : 'OK'} className=${rinseAidLow ? 'warning' : 'online'} />
+          <${StatusBadge} status=${rinseAidStatus} className=${rinseAidClass} />
         </div>
         ${prog ? html`
           <div class="info-row">

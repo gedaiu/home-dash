@@ -297,16 +297,27 @@ async function lookupBatch(ips) {
 
 // Resolve hostnames for all cached entries that don't have them
 async function resolveAllHostnames(onProgress) {
+  console.log('[GeoIP] resolveAllHostnames called, cache size:', cache.size);
+
   if (resolverStatus.inProgress) {
+    console.log('[GeoIP] Resolution already in progress');
     return { success: false, message: 'Resolution already in progress' };
   }
 
   const ipsToResolve = [];
 
   for (const [ip, entry] of cache) {
-    if (entry.data && entry.data.hostname === undefined) {
+    // Resolve if hostname is undefined or null (failed previous resolution)
+    if (entry.data && (entry.data.hostname === undefined || entry.data.hostname === null)) {
       ipsToResolve.push(ip);
     }
+  }
+
+  console.log('[GeoIP] IPs to resolve:', ipsToResolve.length, 'of', cache.size, 'cached');
+
+  // Clear DNS cache to force fresh lookups
+  for (const ip of ipsToResolve) {
+    dnsCache.delete(ip);
   }
 
   resolverStatus.total = ipsToResolve.length;

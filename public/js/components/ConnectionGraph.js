@@ -991,7 +991,9 @@ export function ConnectionGraph({ displayMode = 'orgs', showIdleDevices = true }
     if (hoveredDevice) setHoveredDevice(null);
   };
 
-  const startResolver = () => {
+  const startResolver = (e) => {
+    e.stopPropagation();
+    console.log('Resolver button clicked');
     sendMessage('resolver:start');
   };
 

@@ -2348,6 +2348,7 @@ select optgroup {
   cursor: pointer;
   border-radius: 4px;
   transition: all 0.15s ease;
+  pointer-events: auto;
 }
 
 .radial-toggle .toggle-btn:hover {
