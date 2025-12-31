@@ -5,7 +5,8 @@ const syncService = require('./services/sync');
 const airpurifierService = require('./services/airpurifier');
 const storage = require('./services/storage');
 
-const PORT = process.env.PORT || 3001;
+const config = storage.load();
+const PORT = process.env.PORT || config.port || 3001;
 
 const server = http.createServer(app);
 websocket.init(server);
@@ -33,14 +34,12 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 server.listen(PORT, async () => {
   console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                    HUE NANOLEAF SYNC                         ║
+║                     HOME DASHBOARD                           ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Server running at http://localhost:${PORT}                     ║
 ║  Press Ctrl+C to stop                                        ║
 ╚══════════════════════════════════════════════════════════════╝
   `);
-
-  const config = storage.load();
 
   if (config.airPurifiers && config.airPurifiers.length > 0) {
     console.log('Auto-starting air purifier polling...');

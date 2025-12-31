@@ -4,8 +4,9 @@ const path = require('node:path');
 
 const TRANSPORT_API_BASE = 'https://v6.bvg.transport.rest';
 const DEFAULT_POLL_INTERVAL = 60000; // 1 minute
-const STATION_CACHE_FILE = path.join(__dirname, '../../data/station-cache.json');
-const DEPARTURES_CACHE_FILE = path.join(__dirname, '../../data/departures-cache.json');
+const DATA_DIR = process.env.HOME_DASHBOARD_DATA || path.join(__dirname, '../../data');
+const STATION_CACHE_FILE = path.join(DATA_DIR, 'station-cache.json');
+const DEPARTURES_CACHE_FILE = path.join(DATA_DIR, 'departures-cache.json');
 const DEPARTURES_CACHE_TTL = 60000; // 1 minute TTL for departures
 
 let broadcastFn = null;

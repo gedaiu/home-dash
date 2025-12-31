@@ -1,7 +1,7 @@
 {
-  "name": "hue-nanoleaf-sync",
+  "name": "home-dashboard",
   "version": "2.0.0",
-  "description": "Web UI to sync Philips Hue lights with Nanoleaf panels",
+  "description": "Home automation dashboard for smart devices",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",

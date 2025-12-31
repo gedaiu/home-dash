@@ -2,8 +2,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const isTest = process.env.NODE_ENV === 'test';
-const CONFIG_FILE = path.join(__dirname, isTest ? '../../data/test-config.json' : '../../network-config.json');
-const DATA_DIR = path.join(__dirname, '../../data');
+const CONFIG_FILE = process.env.HOME_DASHBOARD_CONFIG ||
+  path.join(__dirname, isTest ? '../../data/test-config.json' : '../../network-config.json');
+const DATA_DIR = process.env.HOME_DASHBOARD_DATA || path.join(__dirname, '../../data');
 const SENSORS_DIR = path.join(DATA_DIR, 'sensors');
 const LOGS_DIR = path.join(DATA_DIR, 'logs');
 const PANEL_NAMES_FILE = path.join(DATA_DIR, 'panel-names.json');

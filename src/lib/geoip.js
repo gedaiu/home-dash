@@ -9,7 +9,8 @@ const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 const DNS_CACHE_TTL = 24 * 60 * 60 * 1000; // 1 day for DNS
 
 // Persistent cache file
-const CACHE_FILE = path.join(__dirname, '../../data/ip-cache.json');
+const DATA_DIR = process.env.HOME_DASHBOARD_DATA || path.join(__dirname, '../../data');
+const CACHE_FILE = path.join(DATA_DIR, 'ip-cache.json');
 
 // Rate limiting for external API
 let lastApiCall = 0;
