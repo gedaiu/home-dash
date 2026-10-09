@@ -41,7 +41,7 @@ export default tseslint.config(
     plugins: { "re-lint": reLint },
     rules: {
       "re-lint/no-prop-mutation": "error",
-      "re-lint/no-duplicate-code": ["error", { roots: ["src", "public/js", "public/app.js"] }],
+      "re-lint/no-duplicate-code": ["error", { roots: ["src", "public/js"] }],
     },
   },
   {
