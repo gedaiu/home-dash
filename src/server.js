@@ -6,6 +6,7 @@ const airpurifierService = require('./services/airpurifier');
 const storage = require('./services/storage');
 
 const config = storage.load();
+const HOST = process.env.HOST || config.host || '0.0.0.0';
 const PORT = process.env.PORT || config.port || 3001;
 
 const server = http.createServer(app);
@@ -31,12 +32,13 @@ function gracefulShutdown(signal) {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-server.listen(PORT, async () => {
+server.listen(PORT, HOST, async () => {
+  const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
   console.log(`
 ╔══════════════════════════════════════════════════════════════╗
 ║                     HOME DASHBOARD                           ║
 ╠══════════════════════════════════════════════════════════════╣
-║  Server running at http://localhost:${PORT}                     ║
+║  Server running at http://${displayHost}:${PORT}
 ║  Press Ctrl+C to stop                                        ║
 ╚══════════════════════════════════════════════════════════════╝
   `);

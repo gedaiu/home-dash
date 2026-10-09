@@ -1,6 +1,8 @@
 const {
   getDeviceCategory,
-  getSensorCategory
+  getSensorCategory,
+  getSensorReadings,
+  sensorValue
 } = require('../../src/services/hue');
 
 describe('getDeviceCategory', () => {
@@ -152,5 +154,37 @@ describe('getSensorCategory', () => {
 
   it('handles empty string', () => {
     expect(getSensorCategory('')).toBe('sensor');
+  });
+});
+
+describe('sensorValue', () => {
+  it('returns 21.5 for a temperature sensor reporting 21.5', () => {
+    expect(sensorValue('temperature', { temperature: 21.5 })).toBe(21.5);
+  });
+
+  it('returns 1 for a motion sensor with presence', () => {
+    expect(sensorValue('motion', { presence: true })).toBe(1);
+  });
+
+  it('returns 0 for a motion sensor without presence', () => {
+    expect(sensorValue('motion', { presence: false })).toBe(0);
+  });
+
+  it('returns 12000 for a light level sensor reporting 12000', () => {
+    expect(sensorValue('lightlevel', { lightlevel: 12000 })).toBe(12000);
+  });
+
+  it('returns null for a temperature sensor without a reading', () => {
+    expect(sensorValue('temperature', {})).toBeNull();
+  });
+
+  it('returns null for a switch', () => {
+    expect(sensorValue('switch', { buttonevent: 1002 })).toBeNull();
+  });
+});
+
+describe('getSensorReadings', () => {
+  it('returns an empty list before the bridge was polled', () => {
+    expect(getSensorReadings()).toEqual([]);
   });
 });

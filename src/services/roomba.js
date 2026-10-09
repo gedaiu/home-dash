@@ -424,9 +424,24 @@ function stopPolling() {
   disconnect();
 }
 
+// Reads only what the robot already reported, so callers like /metrics never open an MQTT connection.
+function getCachedStatus() {
+  if (robotState.batPct === undefined) {
+    return null;
+  }
+
+  return {
+    name: robotState.name || getConfig()?.name || 'Roomba',
+    batteryPercent: parseBattery(robotState.batPct).percent,
+    phase: parseMission(robotState.cleanMissionStatus).phase,
+    binFull: parseBin(robotState.bin).full
+  };
+}
+
 module.exports = {
   isConfigured,
   getStatus,
+  getCachedStatus,
   start,
   stop,
   pause,

@@ -11,6 +11,7 @@ const openwrtRoutes = require('./routes/openwrt');
 const weatherRoutes = require('./routes/weather');
 const transportRoutes = require('./routes/transport');
 const devicesRoutes = require('./routes/devices');
+const metrics = require('./services/metrics');
 
 const app = express();
 
@@ -28,6 +29,10 @@ app.use('/api/openwrt', openwrtRoutes);
 app.use('/api/weather', weatherRoutes);
 app.use('/api/transport', transportRoutes);
 app.use('/api/devices', devicesRoutes);
+
+app.get('/metrics', (req, res) => {
+  res.type('text/plain; version=0.0.4').send(metrics.formatMetrics(metrics.collectSnapshot()));
+});
 
 app.use((err, req, res, next) => {
   console.error(err.stack);

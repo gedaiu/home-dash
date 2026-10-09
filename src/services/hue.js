@@ -17,6 +17,7 @@ const savedData = storage.loadSensorData();
 const sensorHistory = savedData.history || {};
 const sensorDailyStats = savedData.dailyStats || {};
 const displayHistory = {};
+const latestSensorReadings = new Map();
 
 for (const [sensorId, entries] of Object.entries(sensorHistory)) {
   if (entries && entries.length > 0) {
@@ -41,16 +42,25 @@ function getToday() {
   return new Date().toISOString().split('T')[0];
 }
 
-function updateSensorHistory(sensorId, category, state) {
-  let value = null;
-
+function sensorValue(category, state) {
   if (category === 'temperature' && state.temperature !== undefined) {
-    value = state.temperature;
-  } else if (category === 'motion') {
-    value = state.presence ? 1 : 0;
-  } else if (category === 'lightlevel' && state.lightlevel !== undefined) {
-    value = state.lightlevel;
+    return state.temperature;
   }
+  if (category === 'motion') {
+    return state.presence ? 1 : 0;
+  }
+  if (category === 'lightlevel' && state.lightlevel !== undefined) {
+    return state.lightlevel;
+  }
+  return null;
+}
+
+function getSensorReadings() {
+  return [...latestSensorReadings.entries()].map(([id, reading]) => ({ id, ...reading }));
+}
+
+function updateSensorHistory(sensorId, category, state) {
+  const value = sensorValue(category, state);
 
   if (value === null) {
     return {
@@ -308,6 +318,10 @@ async function getSensors() {
       };
 
       const { history, dailyStats } = updateSensorHistory(storageId, category, sensorState);
+      const value = sensorValue(category, sensorState);
+      if (value !== null) {
+        latestSensorReadings.set(storageId, { name: sensorName, category, value });
+      }
 
       return {
         id: storageId,
@@ -524,6 +538,8 @@ module.exports = {
   resetApi,
   getDeviceCategory,
   getSensorCategory,
+  getSensorReadings,
+  sensorValue,
   setBroadcast,
   startPolling,
   stopPolling

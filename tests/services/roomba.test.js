@@ -1,4 +1,5 @@
 const {
+  getCachedStatus,
   parseMission,
   parseBattery,
   parseBin,
@@ -314,5 +315,11 @@ describe('roomba service', () => {
     it('parses timezone', () => {
       expect(parseDeviceInfo({ timezone: 'America/New_York' }).timezone).toBe('America/New_York');
     });
+  });
+});
+
+describe('getCachedStatus', () => {
+  it('returns null before the robot reported any state', () => {
+    expect(getCachedStatus()).toBeNull();
   });
 });
