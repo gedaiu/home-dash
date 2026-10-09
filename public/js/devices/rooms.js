@@ -1,160 +1,152 @@
 import { html } from 'htm/preact';
 import { useState, useEffect } from 'preact/hooks';
-import { rooms, hue, nanoleaf, addLog, getPanelName } from '../state.js';
+import { rooms, hue, nanoleaf, addLog } from '../state.js';
 import { API } from '../api.js';
 import { Panel } from '../components/Panel.js';
+import { getRoomIcon, getDeviceIcon, getLightColor, getStateText, getNanoleafColor } from './rooms-helpers.js';
 
-const ROOM_ICONS = {
-  'living_room': 'sofa',
-  'kitchen': 'utensils',
-  'dining': 'utensils-crossed',
-  'bedroom': 'bed-double',
-  'kids_bedroom': 'baby',
-  'bathroom': 'bath',
-  'nursery': 'baby',
-  'recreation': 'gamepad-2',
-  'office': 'briefcase',
-  'gym': 'dumbbell',
-  'hallway': 'door-open',
-  'toilet': 'droplets',
-  'front_door': 'door-closed',
-  'garage': 'warehouse',
-  'terrace': 'trees',
-  'garden': 'flower-2',
-  'driveway': 'car',
-  'carport': 'car',
-  'home': 'home',
-  'downstairs': 'arrow-down',
-  'upstairs': 'arrow-up',
-  'top_floor': 'arrow-up-to-line',
-  'attic': 'triangle',
-  'guest_room': 'bed-single',
-  'staircase': 'stairs',
-  'lounge': 'armchair',
-  'man_cave': 'gamepad-2',
-  'computer': 'monitor',
-  'studio': 'music',
-  'music': 'music-2',
-  'tv': 'tv',
-  'reading': 'book-open',
-  'closet': 'shirt',
-  'storage': 'archive',
-  'laundry_room': 'washing-machine',
-  'balcony': 'fence',
-  'porch': 'lamp',
-  'barbecue': 'flame',
-  'pool': 'waves',
-  'other': 'layout-grid'
-};
+export { roomsGrid as Rooms };
 
-const ARCHETYPE_ICONS = {
-  'sultanbulb': 'lightbulb',
-  'classicbulb': 'lightbulb',
-  'vintagebulb': 'lightbulb',
-  'candlebulb': 'lightbulb',
-  'spotbulb': 'circle-dot',
-  'recessedceiling': 'circle-dot',
-  'recessedfloor': 'circle-dot',
-  'pendantround': 'lamp-ceiling',
-  'pendantlong': 'lamp-ceiling',
-  'ceilinghorizontal': 'lamp-ceiling',
-  'ceilingvertical': 'lamp-ceiling',
-  'ceilinground': 'lamp-ceiling',
-  'ceilingsquare': 'lamp-ceiling',
-  'flexiblelamp': 'lamp-desk',
-  'tablelamp': 'lamp-desk',
-  'tableshade': 'lamp-desk',
-  'floorlamp': 'lamp-floor',
-  'floorlantern': 'lamp-floor',
-  'floorshade': 'lamp-floor',
-  'singlespot': 'circle-dot',
-  'doublespot': 'circle-dot',
-  'walllantern': 'lamp-wall-down',
-  'wallshade': 'lamp-wall-down',
-  'wallspot': 'lamp-wall-down',
-  'plug': 'plug',
-  'lightstrip': 'grip-horizontal',
-  'huelightstrip': 'grip-horizontal',
-  'hueplay': 'tv',
-  'huego': 'battery',
-  'huebloom': 'sparkles',
-  'hueiris': 'sparkles',
-  'twilight': 'moon-star',
-  'bollard': 'cylinder',
-  'christmastree': 'tree-pine'
-};
+// Legacy exports for backwards compatibility
+export async function loadRooms() {
+  try {
+    const [roomsData, device, config] = await Promise.all([
+      API.hue.rooms(),
+      API.nanoleaf.device(),
+      API.nanoleaf.config()
+    ]);
 
-const CATEGORY_ICONS = {
-  plug: 'plug',
-  strip: 'grip-horizontal',
-  candle: 'flame',
-  spot: 'circle-dot',
-  ceiling: 'lamp-ceiling',
-  lamp: 'lamp-desk',
-  bulb: 'lightbulb',
-  device: 'cpu'
-};
+    rooms.value = roomsData;
 
-function getRoomIcon(roomClass) {
-  return ROOM_ICONS[roomClass] || 'layout-grid';
+    nanoleaf.value = {
+      device: device?.configured ? device : null,
+      config: config?.configured ? config : null
+    };
+
+    const allLights = roomsData.flatMap(room => room.lights);
+    hue.value = { ...hue.value, lights: allLights };
+  } catch (err) {
+    addLog(`Failed to load rooms: ${err.message}`, 'error');
+  }
 }
 
-function getDeviceIcon(category, archetype) {
-  if (archetype && ARCHETYPE_ICONS[archetype]) {
-    return ARCHETYPE_ICONS[archetype];
-  }
-  return CATEGORY_ICONS[category] || 'cpu';
+export function updateRooms(roomsData) {
+  rooms.value = roomsData;
+
+  const allLights = roomsData.flatMap(room => room.lights);
+  hue.value = { ...hue.value, lights: allLights };
 }
 
-function getLightColor(state) {
-  if (!state.on || state.reachable === false) {
-    return '#333';
+function roomsGrid() {
+  const allRooms = rooms.value || [];
+  const nanoleafState = nanoleaf.value;
+  const [selectedLightId, setSelectedLightId] = useState(null);
+
+  useEffect(() => {
+    loadSyncConfig(setSelectedLightId);
+  }, []);
+
+  const regularRooms = allRooms.filter(room => room.id !== 'sensors');
+
+  if (regularRooms.length === 0) {
+    return html`
+      <div class="rooms-grid" id="rooms-content">
+        <div class="loading">No rooms found. Configure Hue Bridge first.</div>
+      </div>
+    `;
   }
 
-  if (state.colormode === 'ct') {
-    const kelvin = Math.round(1000000 / state.ct);
-    if (kelvin < 4000) {
-      return '#ffcc88';
+  return html`
+    <div class="rooms-grid" id="rooms-content">
+      ${regularRooms.map(room => html`
+        <${roomPanel}
+          key=${room.id}
+          room=${room}
+          selectedLightId=${selectedLightId}
+          nanoleafDevice=${nanoleafState.device}
+          nanoleafConfig=${nanoleafState.config}
+        />
+      `)}
+    </div>
+  `;
+}
+
+async function loadSyncConfig(setSelectedLightId) {
+  try {
+    const config = await API.sync.config();
+
+    if (config.hueDeviceId) {
+      setSelectedLightId(config.hueDeviceId);
     }
-    return '#fff5e6';
+  } catch (err) {
+    // Ignore config load errors
   }
-
-  if (state.hue !== undefined && state.sat !== undefined) {
-    const h = (state.hue / 65535) * 360;
-    const s = (state.sat / 254) * 100;
-    return `hsl(${h}, ${s}%, 50%)`;
-  }
-
-  return '#fff';
 }
 
-function getStateText(light) {
-  if (light.state.reachable === false) {
-    return 'OFFLINE';
-  }
+function roomPanel({ room, selectedLightId, nanoleafDevice, nanoleafConfig }) {
+  const { refreshing, handleRefresh } = useRoomRefresh();
+  const panelKey = `room:${room.id}`;
+  const showNanoleaf = nanoleafConfig?.roomId?.toLowerCase() === room.name.toLowerCase();
 
-  if (!light.state.on) {
-    return 'OFF';
-  }
+  useIconRefresh(room.lights);
 
-  if (light.state.bri !== undefined) {
-    return `${Math.round(light.state.bri / 254 * 100)}%`;
-  }
-
-  return 'ON';
+  return html`
+    <${Panel}
+      icon=${getRoomIcon(room.class)}
+      title=${room.name.toUpperCase()}
+      panelKey=${panelKey}
+      defaultName=${room.name.toUpperCase()}
+      controls=${refreshButton(refreshing, handleRefresh)}
+    >
+      <div class="lights-list">
+        ${showNanoleaf && nanoleafDevice?.configured && html`
+          <${nanoleafItem} device=${nanoleafDevice} />
+        `}
+        ${room.lights.map(light => html`
+          <${lightItem}
+            key=${light.id}
+            light=${light}
+            isSelected=${String(light.id) === String(selectedLightId)}
+          />
+        `)}
+      </div>
+    <//>
+  `;
 }
 
-function getNanoleafColor(state) {
-  if (!state?.on) {
-    return '#333';
+function useRoomRefresh() {
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+
+    try {
+      await loadRooms();
+    } finally {
+      setRefreshing(false);
+    }
   }
-  if (state.hue !== undefined && state.sat !== undefined) {
-    return `hsl(${state.hue}, ${state.sat}%, 50%)`;
-  }
-  return '#fff';
+
+  return { refreshing, handleRefresh };
 }
 
-function LightItem({ light, isSelected }) {
+function useIconRefresh(lights) {
+  useEffect(() => {
+    if (typeof lucide !== 'undefined') {
+      lucide.createIcons();
+    }
+  }, [lights]);
+}
+
+function refreshButton(refreshing, handleRefresh) {
+  return html`
+    <button class=${`btn-icon ${refreshing ? 'spinning' : ''}`} onClick=${handleRefresh} title="Refresh">
+      <i data-lucide="refresh-cw"></i>
+    </button>
+  `;
+}
+
+function lightItem({ light, isSelected }) {
   const isOn = light.state.on && light.state.reachable !== false;
   const isOffline = light.state.reachable === false;
   const color = getLightColor(light.state);
@@ -182,154 +174,32 @@ function LightItem({ light, isSelected }) {
   `;
 }
 
-function NanoleafItem({ device }) {
+function nanoleafItem({ device }) {
   if (!device) {
     return null;
   }
 
-  const isOn = device.state?.on;
-  const color = isOn ? getNanoleafColor(device.state) : '#333';
-  const stateText = isOn ? `${device.state?.brightness || 0}%` : 'OFF';
+  const { onClass, offClass, color, stateText } = describeNanoleaf(device.state);
 
   return html`
     <div
-      class=${`light-item nanoleaf-item ${isOn ? '' : 'off'}`}
+      class=${`light-item nanoleaf-item ${offClass}`}
       data-id="nanoleaf"
       data-name=${device.name}
       data-category="nanoleaf"
     >
-      <i data-lucide="triangle" class=${`device-icon ${isOn ? 'on' : ''}`}></i>
-      <span class=${`light-indicator ${isOn ? 'on' : ''}`} style=${`background-color: ${color}`}></span>
+      <i data-lucide="triangle" class=${`device-icon ${onClass}`}></i>
+      <span class=${`light-indicator ${onClass}`} style=${`background-color: ${color}`}></span>
       <span class="light-name">${device.name}</span>
       <span class="light-state">${stateText}</span>
     </div>
   `;
 }
 
-function RoomPanel({ room, selectedLightId, nanoleafDevice, nanoleafConfig }) {
-  const [refreshing, setRefreshing] = useState(false);
-  const roomIcon = getRoomIcon(room.class);
-  const panelKey = `room:${room.id}`;
-  const displayName = getPanelName(panelKey, room.name.toUpperCase());
-
-  const showNanoleaf = nanoleafConfig?.roomId?.toLowerCase() === room.name.toLowerCase();
-
-  async function handleRefresh() {
-    setRefreshing(true);
-    try {
-      await loadRooms();
-    } finally {
-      setRefreshing(false);
-    }
+function describeNanoleaf(state) {
+  if (!state?.on) {
+    return { onClass: '', offClass: 'off', color: getNanoleafColor(null), stateText: 'OFF' };
   }
 
-  useEffect(() => {
-    if (typeof lucide !== 'undefined') {
-      lucide.createIcons();
-    }
-  }, [room.lights]);
-
-  const refreshButton = html`
-    <button class=${`btn-icon ${refreshing ? 'spinning' : ''}`} onClick=${handleRefresh} title="Refresh">
-      <i data-lucide="refresh-cw"></i>
-    </button>
-  `;
-
-  return html`
-    <${Panel}
-      icon=${roomIcon}
-      title=${room.name.toUpperCase()}
-      panelKey=${panelKey}
-      defaultName=${room.name.toUpperCase()}
-      controls=${refreshButton}
-    >
-      <div class="lights-list">
-        ${showNanoleaf && nanoleafDevice?.configured && html`
-          <${NanoleafItem} device=${nanoleafDevice} />
-        `}
-        ${room.lights.map(light => html`
-          <${LightItem}
-            key=${light.id}
-            light=${light}
-            isSelected=${String(light.id) === String(selectedLightId)}
-          />
-        `)}
-      </div>
-    <//>
-  `;
-}
-
-export function Rooms() {
-  const allRooms = rooms.value || [];
-  const nanoleafState = nanoleaf.value;
-  const [selectedLightId, setSelectedLightId] = useState(null);
-
-  useEffect(() => {
-    loadSyncConfig();
-  }, []);
-
-  async function loadSyncConfig() {
-    try {
-      const config = await API.sync.config();
-      if (config.hueDeviceId) {
-        setSelectedLightId(config.hueDeviceId);
-      }
-    } catch (err) {
-      // Ignore config load errors
-    }
-  }
-
-  const regularRooms = allRooms.filter(r => r.id !== 'sensors');
-
-  if (regularRooms.length === 0) {
-    return html`
-      <div class="rooms-grid" id="rooms-content">
-        <div class="loading">No rooms found. Configure Hue Bridge first.</div>
-      </div>
-    `;
-  }
-
-  return html`
-    <div class="rooms-grid" id="rooms-content">
-      ${regularRooms.map(room => html`
-        <${RoomPanel}
-          key=${room.id}
-          room=${room}
-          selectedLightId=${selectedLightId}
-          nanoleafDevice=${nanoleafState.device}
-          nanoleafConfig=${nanoleafState.config}
-        />
-      `)}
-    </div>
-  `;
-}
-
-// Legacy exports for backwards compatibility
-export async function loadRooms() {
-  try {
-    const [roomsData, device, config] = await Promise.all([
-      API.hue.rooms(),
-      API.nanoleaf.device(),
-      API.nanoleaf.config()
-    ]);
-
-    rooms.value = roomsData;
-
-    nanoleaf.value = {
-      device: device?.configured ? device : null,
-      config: config?.configured ? config : null
-    };
-
-    const allLights = roomsData.flatMap(r => r.lights);
-    hue.value = { ...hue.value, lights: allLights };
-  } catch (err) {
-    addLog(`Failed to load rooms: ${err.message}`, 'error');
-  }
-}
-
-export function updateRooms(data) {
-  rooms.value = data;
-
-  const allLights = data.flatMap(r => r.lights);
-  hue.value = { ...hue.value, lights: allLights };
+  return { onClass: 'on', offClass: '', color: getNanoleafColor(state), stateText: `${state.brightness || 0}%` };
 }

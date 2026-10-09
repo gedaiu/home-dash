@@ -16,7 +16,46 @@ import { OutsidePage } from './OutsidePage.js';
 import { loadPanelNames, addLog, currentPage } from '../state.js';
 import { initWebSocket } from '../websocket-preact.js';
 
-function HomePage() {
+function app() {
+  const [page, setPage] = useState(currentPage.value);
+
+  useEffect(() => {
+    loadPanelNames();
+    initWebSocket();
+
+    // Create lucide icons after render
+    setTimeout(() => {
+      if (window.lucide) {
+        window.lucide.createIcons();
+      }
+    }, 0);
+
+    addLog('System ready');
+
+    const dispose = effect(() => {
+      setPage(currentPage.value);
+    });
+
+    return dispose;
+  }, []);
+
+  // Re-create icons when components update
+  useEffect(() => {
+    if (window.lucide) {
+      window.lucide.createIcons();
+    }
+  });
+
+  return html`
+    <${Layout}>
+      ${page === 'home' && html`<${homePage} />`}
+      ${page === 'network' && html`<${NetworkPage} />`}
+      ${page === 'outside' && html`<${OutsidePage} />`}
+    <//>
+  `;
+}
+
+function homePage() {
   return html`
     <div class="panel-row" id="devices-row">
       <${Roomba} />
@@ -47,40 +86,4 @@ function HomePage() {
   `;
 }
 
-export function App() {
-  const [page, setPage] = useState(currentPage.value);
-
-  useEffect(() => {
-    loadPanelNames();
-    initWebSocket();
-
-    // Create lucide icons after render
-    setTimeout(() => {
-      if (window.lucide) {
-        window.lucide.createIcons();
-      }
-    }, 0);
-
-    addLog('System ready');
-
-    const dispose = effect(() => {
-      setPage(currentPage.value);
-    });
-    return dispose;
-  }, []);
-
-  // Re-create icons when components update
-  useEffect(() => {
-    if (window.lucide) {
-      window.lucide.createIcons();
-    }
-  });
-
-  return html`
-    <${Layout}>
-      ${page === 'home' && html`<${HomePage} />`}
-      ${page === 'network' && html`<${NetworkPage} />`}
-      ${page === 'outside' && html`<${OutsidePage} />`}
-    <//>
-  `;
-}
+export { app as App };

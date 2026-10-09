@@ -1,6 +1,7 @@
 const express = require('express');
 const storage = require('../services/storage');
 
+const { HTTP_NOT_FOUND } = require('../lib/http-status');
 const router = express.Router();
 
 router.get('/', (req, res) => {
@@ -12,35 +13,15 @@ router.get('/:mac', (req, res) => {
   const device = storage.getDevice(mac);
 
   if (!device) {
-    return res.status(404).json({ error: 'Device not found' });
+    return res.status(HTTP_NOT_FOUND).json({ error: 'Device not found' });
   }
 
   res.json(device);
 });
 
 router.put('/:mac', (req, res) => {
-  const { mac } = req.params;
-  const { name, type, color, verified } = req.body;
-
-  const deviceConfig = {};
-
-  if (name !== undefined) {
-    deviceConfig.name = name;
-  }
-
-  if (type !== undefined) {
-    deviceConfig.type = type;
-  }
-
-  if (color !== undefined) {
-    deviceConfig.color = color;
-  }
-
-  if (verified !== undefined) {
-    deviceConfig.verified = verified;
-  }
-
-  const device = storage.setDevice(mac, deviceConfig);
+  const deviceConfig = pickDefinedFields(req.body);
+  const device = storage.setDevice(req.params.mac, deviceConfig);
   res.json(device);
 });
 
@@ -49,5 +30,12 @@ router.delete('/:mac', (req, res) => {
   storage.deleteDevice(mac);
   res.json({ success: true });
 });
+
+function pickDefinedFields(body) {
+  const { name, type, color, verified } = body;
+  const fields = { name, type, color, verified };
+
+  return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
+}
 
 module.exports = router;

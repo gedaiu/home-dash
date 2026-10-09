@@ -1,82 +1,77 @@
 #!/usr/bin/env node
 
 const coap = require('node-coap-client').CoapClient;
-const crypto = require('crypto');
-const aesjs = require('aes-js');
+const {
+  resolveDeviceIp,
+  createBaseUrl,
+  createSyncToken,
+  createObserveOptions,
+  createConfirmedOptions,
+  decryptPayload
+} = require('./scripts/philips/common');
 
-const SECRET_KEY = 'JiangPan';
-const DEVICE_IP = process.argv[2] || '192.168.1.237';
-const baseUrl = `coap://${DEVICE_IP}:5683`;
+const STATUS_TIMEOUT_MS = 15000;
+const JSON_INDENT = 2;
 
-console.log('Philips Air Purifier - Raw Data Dump');
-console.log('Device:', DEVICE_IP);
-console.log('');
+function main() {
+  const deviceIp = resolveDeviceIp();
 
-function decrypt(hexPayload) {
-  const saltHex = hexPayload.slice(0, 8);
-  const ciphertextHex = hexPayload.slice(8, -64);
+  console.log('Philips Air Purifier - Raw Data Dump');
+  console.log('Device:', deviceIp);
+  console.log('');
 
-  const hash = crypto.createHash('md5')
-    .update(Buffer.from(SECRET_KEY + saltHex, 'utf-8'))
-    .digest('hex')
-    .toUpperCase();
-
-  const key = Buffer.from(hash.substring(0, 16), 'utf-8');
-  const iv = Buffer.from(hash.substring(16), 'utf-8');
-
-  const ciphertext = Buffer.from(ciphertextHex, 'hex');
-  const aesCbc = new aesjs.ModeOfOperation.cbc(key, iv);
-  const decrypted = aesCbc.decrypt(ciphertext);
-
-  const plaintext = aesjs.utils.utf8.fromBytes(decrypted);
-  const cleaned = plaintext.replace(/[\u0000-\u001f]+/g, '');
-  
-  return JSON.parse(cleaned);
+  run(createBaseUrl(deviceIp)).catch(console.error);
 }
 
-async function run() {
+async function run(baseUrl) {
   coap.stopObserving(`${baseUrl}/sys/dev/status`);
   coap.reset(baseUrl);
-  
-  // Sync
-  const token = crypto.randomBytes(32).toString('hex').toUpperCase();
-  await coap.request(`${baseUrl}/sys/dev/sync`, 'post',
-    Buffer.from(token, 'utf-8'),
-    { keepAlive: true, confirmable: true, retransmit: true }
-  );
+
+  await coap.request(`${baseUrl}/sys/dev/sync`, 'post', createSyncToken(), createConfirmedOptions());
   console.log('Synced\n');
 
-  // Get one status update and dump all fields
-  await new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      console.log('Timeout - no updates received');
-      resolve();
-    }, 15000);
-
-    coap.observe(`${baseUrl}/sys/dev/status`, 'get', 
-      (response) => {
-        if (response.payload && response.payload.length > 0) {
-          clearTimeout(timeout);
-          const payload = response.payload.toString('utf-8');
-          
-          try {
-            const data = decrypt(payload);
-            console.log('=== RAW DECRYPTED DATA ===');
-            console.log(JSON.stringify(data, null, 2));
-          } catch (e) {
-            console.log('Decrypt failed:', e.message);
-          }
-          
-          coap.stopObserving(`${baseUrl}/sys/dev/status`);
-          resolve();
-        }
-      },
-      '',
-      { keepAlive: true, confirmable: false, retransmit: true }
-    );
-  });
+  await dumpFirstStatus(baseUrl);
 
   coap.reset();
 }
 
-run().catch(console.error);
+function dumpFirstStatus(baseUrl) {
+  return new Promise(resolve => {
+    const timeout = setTimeout(() => {
+      console.log('Timeout - no updates received');
+      resolve();
+    }, STATUS_TIMEOUT_MS);
+
+    coap.observe(
+      `${baseUrl}/sys/dev/status`,
+      'get',
+      response => handleStatus({ baseUrl, response, timeout, resolve }),
+      '',
+      createObserveOptions()
+    );
+  });
+}
+
+function handleStatus({ baseUrl, response, timeout, resolve }) {
+  if (!response.payload || response.payload.length === 0) {
+    return;
+  }
+
+  clearTimeout(timeout);
+  printDecrypted(response.payload.toString('utf-8'));
+  coap.stopObserving(`${baseUrl}/sys/dev/status`);
+  resolve();
+}
+
+function printDecrypted(payload) {
+  try {
+    const status = decryptPayload(payload);
+
+    console.log('=== RAW DECRYPTED DATA ===');
+    console.log(JSON.stringify(status, null, JSON_INDENT));
+  } catch (error) {
+    console.log('Decrypt failed:', error.message);
+  }
+}
+
+main();

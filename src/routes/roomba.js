@@ -1,16 +1,17 @@
 const express = require('express');
 const roombaService = require('../services/roomba');
 
+const asyncHandler = require('../lib/async-handler');
 const router = express.Router();
-
-const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 router.get('/status', async (req, res) => {
   try {
     const status = await roombaService.getStatus();
+
     if (!status) {
       return res.json({ configured: false });
     }
+
     res.json({ configured: true, ...status });
   } catch (err) {
     res.json({ configured: false, error: err.message });

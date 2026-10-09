@@ -9,8 +9,14 @@ export async function loadHueBridge() {
   try {
     const bridge = await API.hue.bridge();
 
-    if (!bridge.configured) {
-      content.innerHTML = `
+    content.innerHTML = bridge.configured ? renderBridgeInfo(bridge) : renderNotConfigured();
+  } catch (err) {
+    content.innerHTML = `<div class="loading error">Error: ${err.message}</div>`;
+  }
+}
+
+function renderNotConfigured() {
+  return `
         <div class="device-info">
           <div class="info-row">
             <span class="label">STATUS:</span>
@@ -21,10 +27,10 @@ export async function loadHueBridge() {
           </p>
         </div>
       `;
-      return;
-    }
+}
 
-    content.innerHTML = `
+function renderBridgeInfo(bridge) {
+  return `
       <div class="device-info">
         <div class="info-row">
           <span class="label">STATUS:</span>
@@ -44,9 +50,6 @@ export async function loadHueBridge() {
         </div>
       </div>
     `;
-  } catch (err) {
-    content.innerHTML = `<div class="loading error">Error: ${err.message}</div>`;
-  }
 }
 
 export async function discoverHue() {
@@ -61,16 +64,17 @@ export async function discoverHue() {
         <p>No Hue bridges were found on your network.</p>
         <p style="margin-top: 12px">Make sure your bridge is powered on and connected to the same network.</p>
       `, '<button class="btn" onclick="hideModal()">CLOSE</button>');
+
       return;
     }
 
     showModal('SELECT HUE BRIDGE', `
       <div class="device-list">
-        ${bridges.map(b => `
-          <div class="device-item" onclick="pairHue('${b.ip}')">
+        ${bridges.map(bridge => `
+          <div class="device-item" onclick="pairHue('${bridge.ip}')">
             <i data-lucide="server"></i>
             <span class="name">Hue Bridge</span>
-            <span class="ip">${b.ip}</span>
+            <span class="ip">${bridge.ip}</span>
           </div>
         `).join('')}
       </div>
@@ -82,7 +86,7 @@ export async function discoverHue() {
   }
 }
 
-export async function pairHue(ip) {
+export async function pairHue(address) {
   showModal('PAIRING HUE BRIDGE', `
     <div class="pairing-instructions">
       <i data-lucide="circle-dot"></i>
@@ -91,35 +95,42 @@ export async function pairHue(ip) {
     </div>
   `, `
     <button class="btn" onclick="hideModal()">CANCEL</button>
-    <button class="btn btn-start" onclick="confirmPairHue('${ip}')">PAIR</button>
+    <button class="btn btn-start" onclick="confirmPairHue('${address}')">PAIR</button>
   `);
   lucide.createIcons();
 }
 
-export async function confirmPairHue(ip, loadRooms) {
+export async function confirmPairHue(address, loadRooms) {
   showModal('PAIRING...', '<div class="loading">Connecting to bridge...</div>');
 
   try {
-    const result = await API.hue.pair(ip);
+    const result = await API.hue.pair(address);
 
-    if (result.success) {
-      hideModal();
-      log('Hue Bridge paired successfully!', 'success');
-      await loadHueBridge();
-      if (loadRooms) {
-        await loadRooms();
-      }
-    } else {
-      showModal('PAIRING FAILED', `
-        <p class="error">${result.error}</p>
-        <p style="margin-top: 12px">Make sure you pressed the Link button, then try again.</p>
-      `, `
-        <button class="btn" onclick="hideModal()">CANCEL</button>
-        <button class="btn btn-start" onclick="pairHue('${ip}')">RETRY</button>
-      `);
+    if (!result.success) {
+      showPairingFailed(result.error, address);
+
+      return;
+    }
+
+    hideModal();
+    log('Hue Bridge paired successfully!', 'success');
+    await loadHueBridge();
+
+    if (loadRooms) {
+      await loadRooms();
     }
   } catch (err) {
     showModal('ERROR', `<p class="error">${err.message}</p>`,
       '<button class="btn" onclick="hideModal()">CLOSE</button>');
   }
+}
+
+function showPairingFailed(errorMessage, address) {
+  showModal('PAIRING FAILED', `
+        <p class="error">${errorMessage}</p>
+        <p style="margin-top: 12px">Make sure you pressed the Link button, then try again.</p>
+      `, `
+        <button class="btn" onclick="hideModal()">CANCEL</button>
+        <button class="btn btn-start" onclick="pairHue('${address}')">RETRY</button>
+      `);
 }

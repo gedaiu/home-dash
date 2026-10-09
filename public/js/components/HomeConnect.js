@@ -1,296 +1,124 @@
 import { html } from 'https://esm.sh/htm@3.1.1/preact';
-import { useState, useEffect, useRef } from 'https://esm.sh/preact@10.19.3/hooks';
+import { useState, useEffect } from 'https://esm.sh/preact@10.19.3/hooks';
 import { effect } from 'https://esm.sh/@preact/signals@1.2.1';
-import { homeConnectState, addLog, getPanelDisplayName } from '../state.js';
+import { homeConnectState, addLog } from '../state.js';
 import { Panel, StatusBadge } from './Panel.js';
+import { homeConnectDevice } from './HomeConnectDevice.js';
 import { API } from '../api.js';
 
-function getOperationStateDisplay(state) {
-  const displays = {
-    'inactive': { label: 'IDLE', className: 'offline' },
-    'ready': { label: 'READY', className: 'ready' },
-    'delayed': { label: 'DELAYED', className: 'pending' },
-    'running': { label: 'RUNNING', className: 'online' },
-    'paused': { label: 'PAUSED', className: 'pending' },
-    'action_required': { label: 'ACTION', className: 'warning' },
-    'finished': { label: 'DONE', className: 'success' },
-    'error': { label: 'ERROR', className: 'offline' },
-    'aborting': { label: 'STOPPING', className: 'pending' }
-  };
-  return displays[state] || { label: state?.toUpperCase() || 'UNKNOWN', className: 'offline' };
-}
-
-function getApplianceIcon(type) {
-  const icons = {
-    'Dishwasher': 'washing-machine',
-    'Washer': 'washing-machine',
-    'Dryer': 'wind',
-    'WasherDryer': 'washing-machine',
-    'Oven': 'flame',
-    'CoffeeMaker': 'coffee',
-    'Refrigerator': 'thermometer-snowflake',
-    'Freezer': 'snowflake',
-    'FridgeFreezer': 'thermometer-snowflake',
-    'Hood': 'wind',
-    'Cooktop': 'flame',
-    'CleaningRobot': 'bot'
-  };
-  return icons[type] || 'cpu';
-}
-
-function formatRemainingTime(seconds) {
-  if (!seconds || seconds <= 0) return '--:--';
-  const hrs = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  if (hrs > 0) {
-    return `${hrs}h ${mins}m`;
-  }
-  return `${mins}m`;
-}
-
-function HomeConnectDevice({ device, onRefresh }) {
-  const icon = getApplianceIcon(device.type);
-  const status = device.status || {};
-  const stateDisplay = getOperationStateDisplay(status.operationState);
-  const panelKey = `homeconnect:${device.id}`;
-  const displayName = getPanelDisplayName(panelKey, device.name.toUpperCase());
-
-  const prog = status.program;
-  const serverRemainingTime = prog?.remainingTime || 0;
-  const [remainingTime, setRemainingTime] = useState(serverRemainingTime);
-  const lastServerTimeRef = useRef(serverRemainingTime);
-
-  useEffect(() => {
-    if (serverRemainingTime !== lastServerTimeRef.current) {
-      setRemainingTime(serverRemainingTime);
-      lastServerTimeRef.current = serverRemainingTime;
-    }
-  }, [serverRemainingTime]);
-
-  useEffect(() => {
-    if (remainingTime <= 0 || status.operationState !== 'running') {
-      return;
-    }
-
-    const timer = setInterval(() => {
-      setRemainingTime(prev => Math.max(0, prev - 60));
-    }, 60000);
-
-    return () => clearInterval(timer);
-  }, [remainingTime, status.operationState]);
-
-  const controls = html`
-    <button class="btn-icon" onClick=${onRefresh} title="Refresh">
-      <i data-lucide="refresh-cw"></i>
-    </button>
-  `;
-
-  if (!device.connected) {
-    return html`
-      <${Panel} panelKey=${panelKey} defaultName=${device.name.toUpperCase()} icon=${icon} controls=${controls}>
-        <div class="device-info">
-          <div class="info-row">
-            <span class="label">STATUS:</span>
-            <${StatusBadge} status="OFFLINE" className="offline" />
-          </div>
-        </div>
-      <//>
-    `;
-  }
-
-  const doorIcon = status.doorState === 'open' ? 'door-open' : 'door-closed';
-
-  const warnings = status.warnings || [];
-  const saltLow = warnings.includes('salt_low');
-  const saltEmpty = warnings.includes('salt_empty');
-  const rinseAidLow = warnings.includes('rinse_aid_low');
-  const rinseAidEmpty = warnings.includes('rinse_aid_empty');
-
-  const saltStatus = saltEmpty ? 'EMPTY' : (saltLow ? 'LOW' : 'OK');
-  const saltClass = saltEmpty ? 'error' : (saltLow ? 'warning' : 'online');
-  const rinseAidStatus = rinseAidEmpty ? 'EMPTY' : (rinseAidLow ? 'LOW' : 'OK');
-  const rinseAidClass = rinseAidEmpty ? 'error' : (rinseAidLow ? 'warning' : 'online');
-
-  const hasProgress = prog && (prog.progress !== null && prog.progress !== undefined);
-  const hasRemainingTime = remainingTime > 0;
-
-  return html`
-    <${Panel} panelKey=${panelKey} defaultName=${device.name.toUpperCase()} icon=${icon} controls=${controls}>
-      <div class="device-info">
-        <div class="info-row">
-          <span class="label">STATUS:</span>
-          <${StatusBadge} status=${stateDisplay.label} className=${stateDisplay.className} />
-        </div>
-        <div class="info-row">
-          <span class="label">DOOR:</span>
-          <span class="value">
-            ${status.doorState?.toUpperCase() || 'UNKNOWN'}
-            <i data-lucide="${doorIcon}" style="width: 14px; height: 14px; margin-left: 4px;"></i>
-          </span>
-        </div>
-        <div class="info-row">
-          <span class="label">SALT:</span>
-          <${StatusBadge} status=${saltStatus} className=${saltClass} />
-        </div>
-        <div class="info-row">
-          <span class="label">RINSE AID:</span>
-          <${StatusBadge} status=${rinseAidStatus} className=${rinseAidClass} />
-        </div>
-        ${prog ? html`
-          <div class="info-row">
-            <span class="label">PROGRAM:</span>
-            <span class="value">${prog.name || 'Running'}</span>
-          </div>
-          ${prog.startInRelative && status.operationState === 'delayed' ? html`
-            <div class="info-row">
-              <span class="label">STARTS IN:</span>
-              <span class="value">${formatRemainingTime(prog.startInRelative)}</span>
-            </div>
-          ` : null}
-          ${hasProgress ? html`
-            <div class="info-row">
-              <span class="label">PROGRESS:</span>
-              <div class="progress-bar-container">
-                <div class="progress-bar-bg">
-                  <div class="progress-bar" style="width: ${prog.progress}%"></div>
-                </div>
-                <span class="progress-text">${prog.progress}%</span>
-              </div>
-            </div>
-          ` : null}
-          ${hasRemainingTime ? html`
-            <div class="info-row">
-              <span class="label">REMAINING:</span>
-              <span class="value">${formatRemainingTime(remainingTime)}</span>
-            </div>
-          ` : null}
-        ` : null}
-        ${status.localControlActive ? html`
-          <div class="info-row">
-            <span class="label">CONTROL:</span>
-            <span class="value">LOCAL</span>
-          </div>
-        ` : null}
-        ${!status.localControlActive && status.remoteControlActive && status.remoteStartAllowed ? html`
-          <div class="info-row">
-            <span class="label">REMOTE:</span>
-            <span class="value">ENABLED</span>
-          </div>
-        ` : null}
-      </div>
-    <//>
-  `;
-}
-
-export function HomeConnect() {
+function homeConnect() {
   const [devices, setDevices] = useState([]);
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const loadStatus = async () => {
-    try {
-      const s = await API.homeconnect.status();
-      setStatus(s);
-
-      if (s.configured && s.authenticated) {
-        const d = await API.homeconnect.devices();
-        homeConnectState.value = d;
-        setDevices(d);
-      }
-      setLoading(false);
-    } catch (err) {
-      console.error('Failed to load HomeConnect:', err);
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadStatus();
+    loadStatus({ setStatus, setDevices, setLoading });
 
     const dispose = effect(() => {
-      const data = homeConnectState.value;
-      if (Array.isArray(data)) {
-        setDevices(data);
+      const stateDevices = homeConnectState.value;
+
+      if (Array.isArray(stateDevices)) {
+        setDevices(stateDevices);
       }
     });
+
     return dispose;
   }, []);
 
-  useEffect(() => {
-    if (window.lucide) {
-      window.lucide.createIcons();
-    }
-  }, [devices, status]);
-
-  const refresh = async () => {
-    try {
-      const d = await API.homeconnect.refresh();
-      homeConnectState.value = d;
-      setDevices(d);
-    } catch (err) {
-      addLog(`HomeConnect refresh failed: ${err.message}`, 'error');
-    }
-  };
+  useLucideIcons([devices, status]);
 
   if (loading) {
-    return html`
-      <${Panel} panelKey="homeconnect" defaultName="HOME CONNECT" icon="washing-machine">
-        <div class="loading">Connecting...</div>
-      <//>
-    `;
+    return renderHomeConnectPanel(html`<div class="loading">Connecting...</div>`);
   }
 
-  if (!status?.configured) {
-    return html`
-      <${Panel} panelKey="homeconnect" defaultName="HOME CONNECT" icon="washing-machine">
-        <div class="device-info">
-          <div class="info-row">
-            <span class="label">STATUS:</span>
-            <${StatusBadge} status="NOT CONFIGURED" className="offline" />
-          </div>
-          <p style="margin-top: 12px; color: var(--text-dim)">
-            Configure in settings
-          </p>
-        </div>
-      <//>
-    `;
-  }
+  const placeholder = renderPlaceholder(status, devices);
 
-  if (!status?.authenticated) {
-    return html`
-      <${Panel} panelKey="homeconnect" defaultName="HOME CONNECT" icon="washing-machine">
-        <div class="device-info">
-          <div class="info-row">
-            <span class="label">STATUS:</span>
-            <${StatusBadge} status="NEEDS AUTH" className="pending" />
-          </div>
-          <p style="margin-top: 12px; color: var(--text-dim)">
-            Authentication required
-          </p>
-        </div>
-      <//>
-    `;
-  }
-
-  if (devices.length === 0) {
-    return html`
-      <${Panel} panelKey="homeconnect" defaultName="HOME CONNECT" icon="washing-machine">
-        <div class="device-info">
-          <div class="info-row">
-            <span class="label">STATUS:</span>
-            <${StatusBadge} status="CONNECTED" className="online" />
-          </div>
-          <p style="margin-top: 12px; color: var(--text-dim)">
-            No appliances found
-          </p>
-        </div>
-      <//>
-    `;
+  if (placeholder) {
+    return renderHomeConnectPanel(placeholder);
   }
 
   return html`
     ${devices.map(device => html`
-      <${HomeConnectDevice} key=${device.id} device=${device} onRefresh=${refresh} />
+      <${homeConnectDevice} key=${device.id} device=${device} onRefresh=${() => refreshDevices(setDevices)} />
     `)}
   `;
 }
+
+function useLucideIcons(dependencies) {
+  useEffect(() => {
+    if (window.lucide) {
+      window.lucide.createIcons();
+    }
+  }, dependencies);
+}
+
+async function loadStatus({ setStatus, setDevices, setLoading }) {
+  const homeConnectApi = API.homeconnect;
+
+  try {
+    const connection = await homeConnectApi.status();
+    setStatus(connection);
+
+    if (connection.configured && connection.authenticated) {
+      const loadedDevices = await homeConnectApi.devices();
+      homeConnectState.value = loadedDevices;
+      setDevices(loadedDevices);
+    }
+  } catch (err) {
+    console.error('Failed to load HomeConnect:', err);
+  }
+
+  setLoading(false);
+}
+
+async function refreshDevices(setDevices) {
+  const homeConnectApi = API.homeconnect;
+
+  try {
+    const refreshedDevices = await homeConnectApi.refresh();
+    homeConnectState.value = refreshedDevices;
+    setDevices(refreshedDevices);
+  } catch (err) {
+    addLog(`HomeConnect refresh failed: ${err.message}`, 'error');
+  }
+}
+
+function renderHomeConnectPanel(content) {
+  return html`
+    <${Panel} panelKey="homeconnect" defaultName="HOME CONNECT" icon="washing-machine">
+      ${content}
+    <//>
+  `;
+}
+
+function renderPlaceholder(status, devices) {
+  if (!status?.configured) {
+    return renderNotice('NOT CONFIGURED', 'offline', 'Configure in settings');
+  }
+
+  if (!status?.authenticated) {
+    return renderNotice('NEEDS AUTH', 'pending', 'Authentication required');
+  }
+
+  if (devices.length === 0) {
+    return renderNotice('CONNECTED', 'online', 'No appliances found');
+  }
+
+  return null;
+}
+
+function renderNotice(badge, className, message) {
+  return html`
+    <div class="device-info">
+      <div class="info-row">
+        <span class="label">STATUS:</span>
+        <${StatusBadge} status=${badge} className=${className} />
+      </div>
+      <p style="margin-top: 12px; color: var(--text-dim)">
+        ${message}
+      </p>
+    </div>
+  `;
+}
+
+export { homeConnect as HomeConnect };

@@ -1,23 +1,10 @@
-const fs = require('fs');
-const path = require('path');
-const dns = require('dns').promises;
+const { isPrivateOrReserved } = require('./geoip-private-ranges');
+const { cache, getFreshEntry, remember, loadCache, saveCache } = require('./geoip-cache');
+const { reverseDns, forgetHostname } = require('./geoip-dns');
+const { fetchFromIpApi } = require('./geoip-api');
 
-// In-memory cache
-const cache = new Map();
-const dnsCache = new Map();
-const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
-const DNS_CACHE_TTL = 24 * 60 * 60 * 1000; // 1 day for DNS
-
-// Persistent cache file
-const DATA_DIR = process.env.HOME_DASHBOARD_DATA || path.join(__dirname, '../../data');
-const CACHE_FILE = path.join(DATA_DIR, 'ip-cache.json');
-
-// Rate limiting for external API
-let lastApiCall = 0;
-const API_RATE_LIMIT = 50; // ms between calls
-
-// Try to load geoip-lite if available
 let geoipLite = null;
+
 try {
   geoipLite = require('geoip-lite');
   console.log('[geoip] Using geoip-lite for lookups');
@@ -25,96 +12,6 @@ try {
   console.log('[geoip] geoip-lite not installed, will use ip-api.com');
 }
 
-// Load persistent cache
-function loadCache() {
-  try {
-    if (fs.existsSync(CACHE_FILE)) {
-      const data = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
-      for (const [ip, entry] of Object.entries(data)) {
-        if (Date.now() - entry.timestamp < CACHE_TTL) {
-          cache.set(ip, entry);
-        }
-      }
-      console.log(`[geoip] Loaded ${cache.size} cached entries`);
-    }
-  } catch (err) {
-    console.error('[geoip] Error loading cache:', err.message);
-  }
-}
-
-// Save persistent cache
-function saveCache() {
-  try {
-    const dir = path.dirname(CACHE_FILE);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-
-    const data = {};
-    for (const [ip, entry] of cache) {
-      data[ip] = entry;
-    }
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2));
-  } catch (err) {
-    console.error('[geoip] Error saving cache:', err.message);
-  }
-}
-
-// Check if IP is private/reserved and should be skipped
-function isPrivateOrReserved(ip) {
-  if (!ip || typeof ip !== 'string') {
-    return true;
-  }
-
-  const parts = ip.split('.').map(Number);
-  if (parts.length !== 4 || parts.some(p => isNaN(p) || p < 0 || p > 255)) {
-    return true;
-  }
-
-  const [a, b] = parts;
-
-  // Private ranges
-  if (a === 10) return true;                           // 10.0.0.0/8
-  if (a === 172 && b >= 16 && b <= 31) return true;   // 172.16.0.0/12
-  if (a === 192 && b === 168) return true;            // 192.168.0.0/16
-
-  // Link-local
-  if (a === 169 && b === 254) return true;            // 169.254.0.0/16
-
-  // Loopback
-  if (a === 127) return true;                          // 127.0.0.0/8
-
-  // Multicast
-  if (a >= 224 && a <= 239) return true;              // 224.0.0.0/4
-
-  // Broadcast
-  if (a === 255) return true;                          // 255.0.0.0/8
-
-  // Current network
-  if (a === 0) return true;                            // 0.0.0.0/8
-
-  return false;
-}
-
-// Reverse DNS lookup with caching
-async function reverseDns(ip) {
-  const cached = dnsCache.get(ip);
-  if (cached && Date.now() - cached.timestamp < DNS_CACHE_TTL) {
-    return cached.hostname;
-  }
-
-  try {
-    const hostnames = await dns.reverse(ip);
-    const hostname = hostnames && hostnames.length > 0 ? hostnames[0] : null;
-    dnsCache.set(ip, { hostname, timestamp: Date.now() });
-    return hostname;
-  } catch {
-    dnsCache.set(ip, { hostname: null, timestamp: Date.now() });
-    return null;
-  }
-}
-
-// Resolver status tracking
 const resolverStatus = {
   total: 0,
   resolved: 0,
@@ -126,123 +23,88 @@ function getResolverStatus() {
   return { ...resolverStatus };
 }
 
-// Lookup IP address
-async function lookup(ip) {
-  // Skip private/reserved IPs
-  if (isPrivateOrReserved(ip)) {
+async function lookup(address) {
+  if (isPrivateOrReserved(address)) {
     return null;
   }
 
-  // Check cache first
-  const cached = cache.get(ip);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    // If cached but missing hostname, try to resolve it
-    if (cached.data && cached.data.hostname === undefined) {
-      const hostname = await reverseDns(ip);
-      if (hostname) {
-        cached.data.hostname = hostname;
-      }
-    }
+  const cached = getFreshEntry(address);
+
+  if (cached) {
+    return fillMissingHostname(address, cached);
+  }
+
+  const hostname = await reverseDns(address);
+  const localData = lookupLocally(address, hostname);
+
+  if (localData) {
+    return localData;
+  }
+
+  return lookupRemotely(address, hostname);
+}
+
+async function fillMissingHostname(address, cached) {
+  const isMissingHostname = cached.data && cached.data.hostname === undefined;
+
+  if (!isMissingHostname) {
     return cached.data;
   }
 
-  // Do reverse DNS lookup (non-blocking, cached)
-  const hostname = await reverseDns(ip);
+  const hostname = await reverseDns(address);
 
-  // Try geoip-lite first (local database, fast)
-  if (geoipLite) {
-    const result = geoipLite.lookup(ip);
-    if (result) {
-      const data = {
-        ip,
-        hostname,
-        country: result.country,
-        countryName: getCountryName(result.country),
-        region: result.region,
-        city: result.city,
-        ll: result.ll,
-        timezone: result.timezone
-      };
-
-      cache.set(ip, { data, timestamp: Date.now() });
-      return data;
-    }
+  if (hostname) {
+    cached.data.hostname = hostname;
   }
 
-  // Fall back to ip-api.com (free tier: 45 requests/minute)
-  try {
-    const data = await fetchFromIpApi(ip);
-    data.hostname = hostname;
-    cache.set(ip, { data, timestamp: Date.now() });
+  return cached.data;
+}
 
-    // Periodically save cache
-    if (cache.size % 100 === 0) {
+function lookupLocally(address, hostname) {
+  const result = geoipLite?.lookup(address);
+
+  if (!result) {
+    return null;
+  }
+
+  const location = {
+    'ip': address,
+    hostname,
+    country: result.country,
+    countryName: getCountryName(result.country),
+    region: result.region,
+    city: result.city,
+    'll': result.ll,
+    timezone: result.timezone
+  };
+
+  remember(address, location);
+
+  return location;
+}
+
+const SAVE_EVERY_N_ENTRIES = 100;
+
+async function lookupRemotely(address, hostname) {
+  try {
+    const location = await fetchFromIpApi(address);
+    location.hostname = hostname;
+    remember(address, location);
+
+    if (cache.size % SAVE_EVERY_N_ENTRIES === 0) {
       saveCache();
     }
 
-    return data;
+    return location;
   } catch (err) {
-    // Cache failed lookups to prevent repeated API calls for the same IP
-    cache.set(ip, { data: null, timestamp: Date.now() });
-    console.error(`[geoip] Lookup failed for ${ip}:`, err.message);
+    remember(address, null);
+    console.error(`[geoip] Lookup failed for ${address}:`, err.message);
+
     return null;
   }
 }
 
-// Fetch from ip-api.com
-async function fetchFromIpApi(ip) {
-  // Rate limiting
-  const now = Date.now();
-  const elapsed = now - lastApiCall;
-  if (elapsed < API_RATE_LIMIT) {
-    await new Promise(resolve => setTimeout(resolve, API_RATE_LIMIT - elapsed));
-  }
-  lastApiCall = Date.now();
-
-  const url = `http://ip-api.com/json/${ip}?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,asname`;
-
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-  }
-
-  const text = await response.text();
-  if (!text || text.trim() === '') {
-    throw new Error('Empty response from ip-api.com');
-  }
-
-  let json;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
-  }
-
-  if (json.status === 'fail') {
-    throw new Error(json.message);
-  }
-
-  return {
-    ip,
-    country: json.countryCode,
-    countryName: json.country,
-    region: json.region,
-    regionName: json.regionName,
-    city: json.city,
-    zip: json.zip,
-    lat: json.lat,
-    lon: json.lon,
-    timezone: json.timezone,
-    isp: json.isp,
-    org: json.org,
-    as: json.as,
-    asName: json.asname
-  };
-}
-
-// Country code to name mapping (common ones)
-const countryNames = {
+const COUNTRY_NAMES = {
   'US': 'United States',
   'GB': 'United Kingdom',
   'DE': 'Germany',
@@ -266,107 +128,102 @@ const countryNames = {
 };
 
 function getCountryName(code) {
-  return countryNames[code] || code;
+  return COUNTRY_NAMES[code] || code;
 }
 
-// Batch lookup for multiple IPs
-async function lookupBatch(ips) {
+async function lookupBatch(addresses) {
+  const addressList = [...addresses];
+  const cachedAddresses = addressList.filter((address) => getFreshEntry(address));
+  const uncachedAddresses = addressList.filter((address) => !getFreshEntry(address));
   const results = {};
-  const uncached = [];
 
-  // Check cache for all IPs
-  for (const ip of ips) {
-    const cached = cache.get(ip);
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      results[ip] = cached.data;
-    } else {
-      uncached.push(ip);
-    }
+  for (const address of cachedAddresses) {
+    results[address] = getFreshEntry(address).data;
   }
 
-  // Lookup uncached IPs (with rate limiting)
-  for (const ip of uncached) {
-    try {
-      results[ip] = await lookup(ip);
-    } catch {
-      results[ip] = null;
-    }
+  for (const address of uncachedAddresses) {
+    results[address] = await lookupOrNull(address);
   }
 
   return results;
 }
 
-// Resolve hostnames for all cached entries that don't have them
+async function lookupOrNull(address) {
+  try {
+    return await lookup(address);
+  } catch {
+    return null;
+  }
+}
+
 async function resolveAllHostnames(onProgress) {
   console.log('[GeoIP] resolveAllHostnames called, cache size:', cache.size);
 
   if (resolverStatus.inProgress) {
     console.log('[GeoIP] Resolution already in progress');
+
     return { success: false, message: 'Resolution already in progress' };
   }
 
-  const ipsToResolve = [];
+  const addressesToResolve = [...cache].filter(([, entry]) => lacksHostname(entry)).map(([address]) => address);
 
-  for (const [ip, entry] of cache) {
-    // Resolve if hostname is undefined or null (failed previous resolution)
-    if (entry.data && (entry.data.hostname === undefined || entry.data.hostname === null)) {
-      ipsToResolve.push(ip);
-    }
-  }
+  console.log('[GeoIP] IPs to resolve:', addressesToResolve.length, 'of', cache.size, 'cached');
 
-  console.log('[GeoIP] IPs to resolve:', ipsToResolve.length, 'of', cache.size, 'cached');
+  addressesToResolve.forEach(forgetHostname);
+  Object.assign(resolverStatus, {
+    total: addressesToResolve.length,
+    resolved: 0,
+    pending: addressesToResolve.length,
+    inProgress: true
+  });
+  reportProgress(onProgress);
 
-  // Clear DNS cache to force fresh lookups
-  for (const ip of ipsToResolve) {
-    dnsCache.delete(ip);
-  }
-
-  resolverStatus.total = ipsToResolve.length;
-  resolverStatus.resolved = 0;
-  resolverStatus.pending = ipsToResolve.length;
-  resolverStatus.inProgress = true;
-
-  if (onProgress) {
-    onProgress({ ...resolverStatus });
-  }
-
-  for (const ip of ipsToResolve) {
-    try {
-      const hostname = await reverseDns(ip);
-      const cached = cache.get(ip);
-      if (cached && cached.data) {
-        cached.data.hostname = hostname;
-      }
-      resolverStatus.resolved++;
-      resolverStatus.pending--;
-
-      if (onProgress) {
-        onProgress({ ...resolverStatus });
-      }
-    } catch {
-      resolverStatus.resolved++;
-      resolverStatus.pending--;
-    }
+  for (const address of addressesToResolve) {
+    await resolveHostname(address, onProgress);
   }
 
   resolverStatus.inProgress = false;
-
-  if (onProgress) {
-    onProgress({ ...resolverStatus });
-  }
-
+  reportProgress(onProgress);
   saveCache();
 
   return { success: true, resolved: resolverStatus.resolved };
 }
 
-// Initialize
+async function resolveHostname(address, onProgress) {
+  try {
+    const hostname = await reverseDns(address);
+    const cached = cache.get(address);
+
+    if (cached && cached.data) {
+      cached.data.hostname = hostname;
+    }
+
+    markResolved();
+    reportProgress(onProgress);
+  } catch {
+    markResolved();
+  }
+}
+
+function lacksHostname(entry) {
+  return Boolean(entry.data) && (entry.data.hostname === undefined || entry.data.hostname === null);
+}
+
+function markResolved() {
+  resolverStatus.resolved++;
+  resolverStatus.pending--;
+}
+
+function reportProgress(onProgress) {
+  if (onProgress) {
+    onProgress({ ...resolverStatus });
+  }
+}
+
+const SAVE_INTERVAL_MS = 60_000;
+
 loadCache();
-
-// Save cache periodically
-setInterval(saveCache, 60 * 1000);
-
-// Save cache on exit
+setInterval(saveCache, SAVE_INTERVAL_MS).unref();
 process.on('exit', saveCache);
 process.on('SIGINT', () => {
   saveCache();

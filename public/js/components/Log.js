@@ -4,7 +4,7 @@ import { effect } from 'https://esm.sh/@preact/signals@1.2.1';
 import { logs, clearLogs } from '../state.js';
 import { Panel } from './Panel.js';
 
-export function Log() {
+function log() {
   const contentRef = useRef(null);
   const [logList, setLogList] = useState([]);
 
@@ -12,13 +12,12 @@ export function Log() {
     const dispose = effect(() => {
       setLogList([...logs.value]);
     });
+
     return dispose;
   }, []);
 
   useEffect(() => {
-    if (contentRef.current) {
-      contentRef.current.scrollTop = contentRef.current.scrollHeight;
-    }
+    scrollToBottom(contentRef.current);
   }, [logList]);
 
   const controls = html`
@@ -30,13 +29,25 @@ export function Log() {
   return html`
     <${Panel} panelKey="log" defaultName="SYSTEM LOG" icon="terminal" controls=${controls}>
       <div class="log-content" ref=${contentRef}>
-        ${logList.map((entry, i) => html`
-          <div class="log-line" key=${i}>
-            <span class="log-time">${entry.time}</span>
-            <span class="log-msg ${entry.type}">${entry.message}</span>
-          </div>
-        `)}
+        ${logList.map(renderLogLine)}
       </div>
     <//>
   `;
 }
+
+function scrollToBottom(element) {
+  if (element) {
+    element.scrollTop = element.scrollHeight;
+  }
+}
+
+function renderLogLine(entry, index) {
+  return html`
+    <div class="log-line" key=${index}>
+      <span class="log-time">${entry.time}</span>
+      <span class="log-msg ${entry.type}">${entry.message}</span>
+    </div>
+  `;
+}
+
+export { log as Log };

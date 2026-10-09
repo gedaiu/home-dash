@@ -26,61 +26,110 @@ const CATEGORY_ICONS = {
   spot: 'circle-dot', ceiling: 'lamp-ceiling', lamp: 'lamp-desk', bulb: 'lightbulb'
 };
 
+const OFF_LIGHT_COLOR = '#333';
+const DEFAULT_LIGHT_COLOR = '#ffcc00';
+const HUE_MAX_BRIGHTNESS = 254;
+const PERCENT = 100;
+const RGB_MAX = 255;
+const GAMMA_THRESHOLD = 0.0031308;
+const GAMMA_SCALE = 1.055;
+const GAMMA_DIVISOR = 2.4;
+const GAMMA_EXPONENT = 1 / GAMMA_DIVISOR;
+const GAMMA_OFFSET = 0.055;
+const LINEAR_SCALE = 12.92;
+const XYZ_TO_RGB_ROWS = [
+  { xWeight: 3.2406, yWeight: -1.5372, zWeight: -0.4986 },
+  { xWeight: -0.9689, yWeight: 1.8758, zWeight: 0.0415 },
+  { xWeight: 0.0557, yWeight: -0.2040, zWeight: 1.0570 }
+];
+const MIREDS_TO_KELVIN = 1000000;
+const KELVIN_SCALE = 100;
+const WARM_LIMIT = 66;
+const COOL_SHIFT = 60;
+const BLUE_SHIFT = 10;
+const BLUE_DARK_LIMIT = 19;
+const WARM_GREEN = { scale: 99.4708, offset: 161.1196 };
+const COOL_RED = { scale: 329.698, exponent: -0.1332 };
+const COOL_GREEN = { scale: 288.122, exponent: -0.0755 };
+const BLUE_CURVE = { scale: 138.5177, offset: 305.0448 };
+
+export function renderRooms() {
+  const [rooms, setRooms] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => subscribeRooms({ setRooms, setLoading }), []);
+
+  useEffect(refreshIcons, [rooms]);
+
+  if (loading) {
+    return html`<div class="loading">Loading rooms...</div>`;
+  }
+
+  if (rooms.length === 0) {
+    return html`<div class="loading">No rooms found. Configure Hue Bridge first.</div>`;
+  }
+
+  return html`
+    ${rooms.map(room => html`<${roomPanel} key=${room.id} room=${room} />`)}
+  `;
+}
+
+export { renderRooms as Rooms };
+
+function subscribeRooms({ setRooms, setLoading }) {
+  loadRooms(setLoading);
+
+  return effect(() => {
+    const allRooms = roomsState.value || [];
+    setRooms(allRooms.filter(room => room.id !== 'sensors'));
+  });
+}
+
+async function loadRooms(setLoading) {
+  try {
+    const loadedRooms = await API.hue.rooms();
+    roomsState.value = loadedRooms || [];
+    setLoading(false);
+  } catch (err) {
+    console.error('Failed to load rooms:', err);
+    setLoading(false);
+  }
+}
+
+function refreshIcons() {
+  if (window.lucide) {
+    window.lucide.createIcons();
+  }
+}
+
+function roomPanel({ room, selectedLightId }) {
+  const roomIcon = getRoomIcon(room.class);
+  const panelKey = `room:${room.id}`;
+  const defaultName = room.name.toUpperCase();
+  const displayName = getPanelDisplayName(panelKey, defaultName);
+
+  return html`
+    <section class="panel room-panel" data-panel-key=${panelKey} data-default-name=${defaultName}>
+      <div class="panel-header">
+        <i data-lucide=${roomIcon}></i>
+        <span class="panel-title">${displayName}</span>
+      </div>
+      <div class="panel-content">
+        <div class="lights-list">
+          ${room.lights.map(light => html`
+            <${lightItem} key=${light.id} light=${light} isSelected=${String(light.id) === String(selectedLightId)} />
+          `)}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function getRoomIcon(roomClass) {
   return ROOM_ICONS[roomClass] || 'layout-grid';
 }
 
-function getDeviceIcon(category, archetype) {
-  if (archetype && ARCHETYPE_ICONS[archetype]) return ARCHETYPE_ICONS[archetype];
-  return CATEGORY_ICONS[category] || 'cpu';
-}
-
-function getLightColor(state) {
-  if (!state.on || state.reachable === false) return '#333';
-  if (state.colormode === 'xy' && state.xy) {
-    const [x, y] = state.xy;
-    const z = 1 - x - y;
-    const Y = state.bri / 254;
-    const X = (Y / y) * x;
-    const Z = (Y / y) * z;
-    let r = X * 3.2406 - Y * 1.5372 - Z * 0.4986;
-    let g = -X * 0.9689 + Y * 1.8758 + Z * 0.0415;
-    let b = X * 0.0557 - Y * 0.2040 + Z * 1.0570;
-    r = r > 0.0031308 ? 1.055 * Math.pow(r, 1/2.4) - 0.055 : 12.92 * r;
-    g = g > 0.0031308 ? 1.055 * Math.pow(g, 1/2.4) - 0.055 : 12.92 * g;
-    b = b > 0.0031308 ? 1.055 * Math.pow(b, 1/2.4) - 0.055 : 12.92 * b;
-    r = Math.min(255, Math.max(0, Math.round(r * 255)));
-    g = Math.min(255, Math.max(0, Math.round(g * 255)));
-    b = Math.min(255, Math.max(0, Math.round(b * 255)));
-    return `rgb(${r},${g},${b})`;
-  }
-  if (state.colormode === 'ct' && state.ct) {
-    const kelvin = Math.round(1000000 / state.ct);
-    const temp = kelvin / 100;
-    let r, g, b;
-    if (temp <= 66) {
-      r = 255;
-      g = Math.min(255, Math.max(0, 99.4708 * Math.log(temp) - 161.1196));
-    } else {
-      r = Math.min(255, Math.max(0, 329.698 * Math.pow(temp - 60, -0.1332)));
-      g = Math.min(255, Math.max(0, 288.122 * Math.pow(temp - 60, -0.0755)));
-    }
-    if (temp >= 66) b = 255;
-    else if (temp <= 19) b = 0;
-    else b = Math.min(255, Math.max(0, 138.5177 * Math.log(temp - 10) - 305.0448));
-    return `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
-  }
-  return '#ffcc00';
-}
-
-function getStateText(light) {
-  if (light.state.reachable === false) return 'Offline';
-  if (!light.state.on) return 'Off';
-  const bri = Math.round((light.state.bri / 254) * 100);
-  return `${bri}%`;
-}
-
-function LightItem({ light, isSelected }) {
+function lightItem({ light, isSelected }) {
   const isOn = light.state.on && light.state.reachable !== false;
   const isOffline = light.state.reachable === false;
   const color = getLightColor(light.state);
@@ -98,63 +147,113 @@ function LightItem({ light, isSelected }) {
   `;
 }
 
-function RoomPanel({ room, selectedLightId }) {
-  const roomIcon = getRoomIcon(room.class);
-  const panelKey = `room:${room.id}`;
-  const displayName = getPanelDisplayName(panelKey, room.name.toUpperCase());
+function getDeviceIcon(category, archetype) {
+  if (archetype && ARCHETYPE_ICONS[archetype]) {
+    return ARCHETYPE_ICONS[archetype];
+  }
 
-  return html`
-    <section class="panel room-panel" data-panel-key=${panelKey} data-default-name=${room.name.toUpperCase()}>
-      <div class="panel-header">
-        <i data-lucide=${roomIcon}></i>
-        <span class="panel-title">${displayName}</span>
-      </div>
-      <div class="panel-content">
-        <div class="lights-list">
-          ${room.lights.map(light => html`
-            <${LightItem} key=${light.id} light=${light} isSelected=${String(light.id) === String(selectedLightId)} />
-          `)}
-        </div>
-      </div>
-    </section>
-  `;
+  return CATEGORY_ICONS[category] || 'cpu';
 }
 
-export function Rooms() {
-  const [rooms, setRooms] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    API.hue.rooms().then(data => {
-      roomsState.value = data || [];
-      setLoading(false);
-    }).catch(err => {
-      console.error('Failed to load rooms:', err);
-      setLoading(false);
-    });
-
-    const dispose = effect(() => {
-      const allRooms = roomsState.value || [];
-      setRooms(allRooms.filter(r => r.id !== 'sensors'));
-    });
-    return dispose;
-  }, []);
-
-  useEffect(() => {
-    if (window.lucide) {
-      window.lucide.createIcons();
-    }
-  }, [rooms]);
-
-  if (loading) {
-    return html`<div class="loading">Loading rooms...</div>`;
+function getLightColor(state) {
+  if (isOffOrUnreachable(state)) {
+    return OFF_LIGHT_COLOR;
   }
 
-  if (rooms.length === 0) {
-    return html`<div class="loading">No rooms found. Configure Hue Bridge first.</div>`;
+  if (hasXyColor(state)) {
+    return xyToRgb(state);
   }
 
-  return html`
-    ${rooms.map(room => html`<${RoomPanel} key=${room.id} room=${room} />`)}
-  `;
+  if (hasColorTemperature(state)) {
+    return colorTemperatureToRgb(state.ct);
+  }
+
+  return DEFAULT_LIGHT_COLOR;
+}
+
+function isOffOrUnreachable(state) {
+  return !state.on || state.reachable === false;
+}
+
+function hasXyColor(state) {
+  return state.colormode === 'xy' && state.xy;
+}
+
+function hasColorTemperature(state) {
+  return state.colormode === 'ct' && state.ct;
+}
+
+function xyToRgb(state) {
+  const [chromaX, chromaY] = state.xy;
+  const chromaZ = 1 - chromaX - chromaY;
+  const luminance = state.bri / HUE_MAX_BRIGHTNESS;
+  const cieX = (luminance / chromaY) * chromaX;
+  const cieZ = (luminance / chromaY) * chromaZ;
+  const [red, green, blue] = XYZ_TO_RGB_ROWS.map(row => {
+    const linear = cieX * row.xWeight + luminance * row.yWeight + cieZ * row.zWeight;
+
+    return clampChannel(Math.round(gammaEncode(linear) * RGB_MAX));
+  });
+
+  return `rgb(${red},${green},${blue})`;
+}
+
+function gammaEncode(linear) {
+  return linear > GAMMA_THRESHOLD
+    ? GAMMA_SCALE * Math.pow(linear, GAMMA_EXPONENT) - GAMMA_OFFSET
+    : LINEAR_SCALE * linear;
+}
+
+function clampChannel(channel) {
+  return Math.min(RGB_MAX, Math.max(0, channel));
+}
+
+function colorTemperatureToRgb(mireds) {
+  const kelvin = Math.round(MIREDS_TO_KELVIN / mireds);
+  const scaledKelvin = kelvin / KELVIN_SCALE;
+  const red = Math.round(temperatureRed(scaledKelvin));
+  const green = Math.round(temperatureGreen(scaledKelvin));
+  const blue = Math.round(temperatureBlue(scaledKelvin));
+
+  return `rgb(${red},${green},${blue})`;
+}
+
+function temperatureRed(scaledKelvin) {
+  if (scaledKelvin <= WARM_LIMIT) {
+    return RGB_MAX;
+  }
+
+  return clampChannel(COOL_RED.scale * Math.pow(scaledKelvin - COOL_SHIFT, COOL_RED.exponent));
+}
+
+function temperatureGreen(scaledKelvin) {
+  if (scaledKelvin <= WARM_LIMIT) {
+    return clampChannel(WARM_GREEN.scale * Math.log(scaledKelvin) - WARM_GREEN.offset);
+  }
+
+  return clampChannel(COOL_GREEN.scale * Math.pow(scaledKelvin - COOL_SHIFT, COOL_GREEN.exponent));
+}
+
+function temperatureBlue(scaledKelvin) {
+  if (scaledKelvin >= WARM_LIMIT) {
+    return RGB_MAX;
+  }
+
+  if (scaledKelvin <= BLUE_DARK_LIMIT) {
+    return 0;
+  }
+
+  return clampChannel(BLUE_CURVE.scale * Math.log(scaledKelvin - BLUE_SHIFT) - BLUE_CURVE.offset);
+}
+
+function getStateText(light) {
+  if (light.state.reachable === false) {
+    return 'Offline';
+  }
+
+  if (!light.state.on) {
+    return 'Off';
+  }
+
+  return `${Math.round((light.state.bri / HUE_MAX_BRIGHTNESS) * PERCENT)}%`;
 }

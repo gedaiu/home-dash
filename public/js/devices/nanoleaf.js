@@ -20,8 +20,14 @@ export async function loadNanoleaf() {
   try {
     const device = await API.nanoleaf.device();
 
-    if (!device.configured) {
-      content.innerHTML = `
+    content.innerHTML = device.configured ? renderNanoleafInfo(device) : renderNotConfigured();
+  } catch (err) {
+    content.innerHTML = `<div class="loading error">Error: ${err.message}</div>`;
+  }
+}
+
+function renderNotConfigured() {
+  return `
         <div class="device-info">
           <div class="info-row">
             <span class="label">STATUS:</span>
@@ -32,49 +38,39 @@ export async function loadNanoleaf() {
           </p>
         </div>
       `;
-      return;
-    }
+}
 
-    const colorStyle = device.state.on
-      ? `background-color: hsl(${device.state.hue}, ${device.state.sat}%, 50%)`
-      : 'background-color: #333';
-
-    content.innerHTML = `
-      <div class="device-info">
-        <div class="info-row">
-          <span class="label">STATUS:</span>
-          <span class="status-badge ${device.state.on ? 'online' : 'offline'}">
+function renderNanoleafInfo(device) {
+  const colorStyle = device.state.on
+    ? `background-color: hsl(${device.state.hue}, ${device.state.sat}%, 50%)`
+    : 'background-color: #333';
+  const statusBadge = `<span class="status-badge ${device.state.on ? 'online' : 'offline'}">
             ${device.state.on ? 'ON' : 'OFF'}
-          </span>
-        </div>
-        <div class="info-row">
-          <span class="label">NAME:</span>
-          <span class="value">${device.name}</span>
-        </div>
-        <div class="info-row">
-          <span class="label">MODEL:</span>
-          <span class="value">${device.model}</span>
-        </div>
-        <div class="info-row">
-          <span class="label">PANELS:</span>
-          <span class="value">${device.panelCount}</span>
-        </div>
-        <div class="info-row">
-          <span class="label">EFFECT:</span>
-          <span class="value">${device.effects.current || 'None'}</span>
-        </div>
-        <div class="info-row">
-          <span class="label">COLOR:</span>
-          <span class="value">
-            <span class="color-preview" style="${colorStyle}"></span>
-            BRI: ${device.state.brightness}%
-          </span>
-        </div>
+          </span>`;
+  const colorValue = `<span class="color-preview" style="${colorStyle}"></span>
+            BRI: ${device.state.brightness}%`;
+
+  return `
+      <div class="device-info">
+        ${renderInfoRow('STATUS', statusBadge)}
+        ${renderInfoRow('NAME', renderValue(device.name))}
+        ${renderInfoRow('MODEL', renderValue(device.model))}
+        ${renderInfoRow('PANELS', renderValue(device.panelCount))}
+        ${renderInfoRow('EFFECT', renderValue(device.effects.current || 'None'))}
+        ${renderInfoRow('COLOR', renderValue(colorValue))}
       </div>
     `;
-  } catch (err) {
-    content.innerHTML = `<div class="loading error">Error: ${err.message}</div>`;
-  }
+}
+
+function renderInfoRow(label, valueMarkup) {
+  return `<div class="info-row">
+          <span class="label">${label}:</span>
+          ${valueMarkup}
+        </div>`;
+}
+
+function renderValue(content) {
+  return `<span class="value">${content}</span>`;
 }
 
 export function getNanoleafColor(state) {
@@ -95,18 +91,23 @@ export function renderNanoleafItem() {
   }
 
   const isOn = nanoleafDevice.state.on;
-  const color = isOn ? getNanoleafColor(nanoleafDevice.state) : '#333';
-  const stateText = isOn ? `${nanoleafDevice.state.brightness}%` : 'OFF';
+
+  return renderNanoleafMarkup(nanoleafDevice, isOn);
+}
+
+function renderNanoleafMarkup(device, isOn) {
+  const color = isOn ? getNanoleafColor(device.state) : '#333';
+  const stateText = isOn ? `${device.state.brightness}%` : 'OFF';
 
   return `
     <div class="light-item nanoleaf-item ${isOn ? '' : 'off'}"
          data-id="nanoleaf"
-         data-name="${nanoleafDevice.name}"
+         data-name="${device.name}"
          data-category="nanoleaf">
       <i data-lucide="triangle" class="device-icon ${isOn ? 'on' : ''}"></i>
       <span class="light-indicator ${isOn ? 'on' : ''}"
             style="background-color: ${color}"></span>
-      <span class="light-name">${nanoleafDevice.name}</span>
+      <span class="light-name">${device.name}</span>
       <span class="light-state">${stateText}</span>
     </div>
   `;
@@ -124,16 +125,17 @@ export async function discoverNanoleaf() {
         <p>No Nanoleaf devices were found on your network.</p>
         <p style="margin-top: 12px">Make sure your device is powered on and connected to the same network.</p>
       `, '<button class="btn" onclick="hideModal()">CLOSE</button>');
+
       return;
     }
 
     showModal('SELECT NANOLEAF', `
       <div class="device-list">
-        ${devices.map(d => `
-          <div class="device-item" onclick="pairNanoleaf('${d.ip}', ${d.port})">
+        ${devices.map(device => `
+          <div class="device-item" onclick="pairNanoleaf('${device.ip}', ${device.port})">
             <i data-lucide="triangle"></i>
-            <span class="name">${d.name}</span>
-            <span class="ip">${d.ip}:${d.port}</span>
+            <span class="name">${device.name}</span>
+            <span class="ip">${device.ip}:${device.port}</span>
           </div>
         `).join('')}
       </div>
@@ -145,7 +147,7 @@ export async function discoverNanoleaf() {
   }
 }
 
-export async function pairNanoleaf(ip, port) {
+export async function pairNanoleaf(address, port) {
   showModal('PAIRING NANOLEAF', `
     <div class="pairing-instructions">
       <i data-lucide="hand"></i>
@@ -154,32 +156,38 @@ export async function pairNanoleaf(ip, port) {
     </div>
   `, `
     <button class="btn" onclick="hideModal()">CANCEL</button>
-    <button class="btn btn-start" onclick="confirmPairNanoleaf('${ip}', ${port})">PAIR</button>
+    <button class="btn btn-start" onclick="confirmPairNanoleaf('${address}', ${port})">PAIR</button>
   `);
   lucide.createIcons();
 }
 
-export async function confirmPairNanoleaf(ip, port) {
+export async function confirmPairNanoleaf(address, port) {
   showModal('PAIRING...', '<div class="loading">Connecting to Nanoleaf...</div>');
 
   try {
-    const result = await API.nanoleaf.pair(ip, port);
+    const result = await API.nanoleaf.pair(address, port);
 
-    if (result.success) {
-      hideModal();
-      log('Nanoleaf paired successfully!', 'success');
-      await loadNanoleaf();
-    } else {
-      showModal('PAIRING FAILED', `
-        <p class="error">${result.error}</p>
-        <p style="margin-top: 12px">Make sure you held the power button until the LED flashed.</p>
-      `, `
-        <button class="btn" onclick="hideModal()">CANCEL</button>
-        <button class="btn btn-start" onclick="pairNanoleaf('${ip}', ${port})">RETRY</button>
-      `);
+    if (!result.success) {
+      showPairingFailed(result.error, address, port);
+
+      return;
     }
+
+    hideModal();
+    log('Nanoleaf paired successfully!', 'success');
+    await loadNanoleaf();
   } catch (err) {
     showModal('ERROR', `<p class="error">${err.message}</p>`,
       '<button class="btn" onclick="hideModal()">CLOSE</button>');
   }
+}
+
+function showPairingFailed(errorMessage, address, port) {
+  showModal('PAIRING FAILED', `
+        <p class="error">${errorMessage}</p>
+        <p style="margin-top: 12px">Make sure you held the power button until the LED flashed.</p>
+      `, `
+        <button class="btn" onclick="hideModal()">CANCEL</button>
+        <button class="btn btn-start" onclick="pairNanoleaf('${address}', ${port})">RETRY</button>
+      `);
 }

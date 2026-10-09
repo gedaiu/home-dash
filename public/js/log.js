@@ -23,9 +23,11 @@ export function log(message, type = '') {
   `;
   footer.classList.remove('flash');
   void footer.offsetWidth;
+
   if (ekgMonitor && !footer.contains(ekgMonitor)) {
     footer.appendChild(ekgMonitor);
   }
+
   footer.classList.add('flash');
 }
 
@@ -36,6 +38,7 @@ export function clearLog() {
 
 export function initLog() {
   const clearBtn = $('#clear-log');
+
   if (clearBtn) {
     clearBtn.addEventListener('click', clearLog);
   }

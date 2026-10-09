@@ -1,22 +1,11 @@
-const express = require('express');
 const transportService = require('../services/transport');
 const storage = require('../services/storage');
 
-const router = express.Router();
+const { HTTP_BAD_REQUEST } = require('../lib/http-status');
+const asyncHandler = require('../lib/async-handler');
+const { createServiceRouter, requireConfigured } = require('../lib/service-router');
+const router = createServiceRouter(transportService);
 
-function asyncHandler(fn) {
-  return (req, res, next) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
-}
-
-router.get('/status', asyncHandler(async (req, res) => {
-  const status = transportService.getStatus();
-  res.json({
-    configured: transportService.isConfigured(),
-    data: status
-  });
-}));
 
 router.get('/config', asyncHandler(async (req, res) => {
   const config = transportService.getConfig();
@@ -34,9 +23,11 @@ router.post('/config', asyncHandler(async (req, res) => {
   res.json({ success: true });
 }));
 
+const DEFAULT_DEPARTURE_LIMIT = 10;
+
 router.get('/departures/:stationName', asyncHandler(async (req, res) => {
   const { stationName } = req.params;
-  const limit = parseInt(req.query.limit, 10) || 10;
+  const limit = parseInt(req.query.limit, 10) || DEFAULT_DEPARTURE_LIMIT;
 
   const station = await transportService.resolveStationId(stationName);
   const departures = await transportService.fetchDepartures(station.id, limit);
@@ -50,18 +41,14 @@ router.get('/journey', asyncHandler(async (req, res) => {
   const { from, to } = req.query;
 
   if (!from || !to) {
-    return res.status(400).json({ error: 'from and to are required' });
+    return res.status(HTTP_BAD_REQUEST).json({ error: 'from and to are required' });
   }
 
   const journey = await transportService.fetchJourney(from, to);
   res.json(journey);
 }));
 
-router.post('/refresh', asyncHandler(async (req, res) => {
-  if (!transportService.isConfigured()) {
-    return res.status(400).json({ error: 'Transport not configured' });
-  }
-
+router.post('/refresh', requireConfigured(transportService, 'Transport'), asyncHandler(async (req, res) => {
   transportService.stopPolling();
   transportService.startPolling();
   res.json({ success: true, data: transportService.getStatus() });

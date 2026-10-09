@@ -1,5 +1,8 @@
 import { signal } from 'https://esm.sh/@preact/signals@1.2.1';
 
+const REQUEST_TIMEOUT_MS = 15000;
+const MAX_LOG_ENTRIES = 100;
+
 // Device states
 export const roombaState = signal(null);
 export const airPurifierState = signal([]);
@@ -12,13 +15,15 @@ export const syncState = signal(null);
 // UI states
 export const logs = signal([]);
 export const panelNames = signal({});
-export const wsConnected = signal(false);
+const INITIAL_WS_CONNECTED = false;
+export const wsConnected = signal(INITIAL_WS_CONNECTED);
 export const wsLatency = signal(null);
 
 // Read initial page from URL hash
 function getPageFromHash() {
   const hash = window.location.hash.slice(1);
   const validPages = ['home', 'network', 'outside'];
+
   return validPages.includes(hash) ? hash : 'home';
 }
 
@@ -96,12 +101,13 @@ export const DEVICE_COLORS = [
 
 export async function loadDeviceCustomizations() {
   try {
-    const response = await fetch('/api/devices');
+    const response = await fetch('/api/devices', { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+
     if (response.ok) {
       deviceCustomizations.value = await response.json();
     }
-  } catch (e) {
-    console.error('Failed to load device customizations:', e);
+  } catch (error) {
+    console.error('Failed to load device customizations:', error);
   }
 }
 
@@ -110,38 +116,37 @@ export async function saveDeviceCustomization(mac, config) {
     const response = await fetch(`/api/devices/${encodeURIComponent(mac)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config)
+      body: JSON.stringify(config),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     });
+
     if (response.ok) {
       const device = await response.json();
       deviceCustomizations.value = { ...deviceCustomizations.value, [mac]: device };
+
       return device;
     }
-  } catch (e) {
-    console.error('Failed to save device customization:', e);
+  } catch (error) {
+    console.error('Failed to save device customization:', error);
   }
+
   return null;
 }
 
-// Find device customization by MAC address or hostname
-// Devices with changing MACs can be matched by hostname
+// Match by MAC first, then by hostname for devices with changing MACs
 export function findDeviceCustomization(mac, hostname) {
-  // First try exact MAC match
   if (mac && deviceCustomizations.value[mac]) {
     return deviceCustomizations.value[mac];
   }
 
-  // Then try hostname match (for devices with changing MACs)
-  if (hostname) {
-    const normalizedHostname = hostname.toLowerCase();
-    for (const custom of Object.values(deviceCustomizations.value)) {
-      if (custom.hostname && custom.hostname.toLowerCase() === normalizedHostname) {
-        return custom;
-      }
-    }
+  if (!hostname) {
+    return null;
   }
 
-  return null;
+  const normalizedHostname = hostname.toLowerCase();
+
+  return Object.values(deviceCustomizations.value)
+    .find(custom => custom.hostname && custom.hostname.toLowerCase() === normalizedHostname) ?? null;
 }
 
 export function getDeviceCustomization(mac, hostname) {
@@ -150,33 +155,27 @@ export function getDeviceCustomization(mac, hostname) {
 
 export function getDeviceIcon(mac, hostname) {
   const custom = findDeviceCustomization(mac, hostname);
-  if (custom?.type) {
-    const deviceType = DEVICE_TYPES.find(t => t.id === custom.type);
-    if (deviceType) {
-      return deviceType.icon;
-    }
-  }
-  return 'help-circle';
+  const deviceType = DEVICE_TYPES.find(type => custom?.type && type.id === custom.type);
+
+  return deviceType ? deviceType.icon : 'help-circle';
 }
 
 export function getDeviceColor(mac, hostname) {
   const custom = findDeviceCustomization(mac, hostname);
-  if (custom?.color) {
-    const deviceColor = DEVICE_COLORS.find(c => c.id === custom.color);
-    if (deviceColor) {
-      return deviceColor.color;
-    }
-  }
-  return '#00d4aa';
+  const deviceColor = DEVICE_COLORS.find(candidate => custom?.color && candidate.id === custom.color);
+
+  return deviceColor ? deviceColor.color : '#00d4aa';
 }
 
 export function getDeviceDisplayName(mac, hostname, fallback) {
   const custom = findDeviceCustomization(mac, hostname);
+
   return custom?.name || fallback;
 }
 
 export function isDeviceVerified(mac, hostname) {
   const custom = findDeviceCustomization(mac, hostname);
+
   return custom?.verified || false;
 }
 
@@ -184,9 +183,11 @@ export function isDeviceVerified(mac, hostname) {
 export function addLog(message, type = '') {
   const time = new Date().toLocaleTimeString();
   const newLogs = [...logs.value, { time, message, type }];
-  if (newLogs.length > 100) {
+
+  if (newLogs.length > MAX_LOG_ENTRIES) {
     newLogs.shift();
   }
+
   logs.value = newLogs;
 }
 
@@ -206,18 +207,20 @@ export function setPanelDisplayName(panelKey, name) {
 }
 
 export function deletePanelDisplayName(panelKey) {
-  const { [panelKey]: _, ...rest } = panelNames.value;
-  panelNames.value = rest;
+  panelNames.value = Object.fromEntries(
+    Object.entries(panelNames.value).filter(([key]) => key !== panelKey)
+  );
   localStorage.setItem('panelNames', JSON.stringify(panelNames.value));
 }
 
 export function loadPanelNames() {
   try {
     const stored = localStorage.getItem('panelNames');
+
     if (stored) {
       panelNames.value = JSON.parse(stored);
     }
-  } catch (e) {
-    console.error('Failed to load panel names:', e);
+  } catch (error) {
+    console.error('Failed to load panel names:', error);
   }
 }

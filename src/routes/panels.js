@@ -1,6 +1,7 @@
 const express = require('express');
 const storage = require('../services/storage');
 
+const { HTTP_BAD_REQUEST } = require('../lib/http-status');
 const router = express.Router();
 
 router.get('/names', (req, res) => {
@@ -12,7 +13,7 @@ router.put('/names/:key', (req, res) => {
   const { name } = req.body;
 
   if (!name || typeof name !== 'string' || name.trim().length === 0) {
-    return res.status(400).json({ error: 'Name is required' });
+    return res.status(HTTP_BAD_REQUEST).json({ error: 'Name is required' });
   }
 
   storage.setPanelName(key, name.trim());

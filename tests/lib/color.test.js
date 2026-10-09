@@ -1,202 +1,175 @@
-const {
-  hueToRgb,
-  ctToRgb,
-  xyToRgb,
-  rgbToHsl,
-  isCloseToWhite,
-  getLightRgb,
-  stateChanged,
-  mapBrightness
-} = require('../../src/lib/color');
+let colors;
+
+beforeAll(async () => {
+  colors = await import('../../src/lib/color');
+});
 
 describe('hueToRgb', () => {
-  test('returns red for hue 0 at full saturation and brightness', () => {
-    const result = hueToRgb(0, 254, 254);
-    expect(result.r).toBeGreaterThan(250);
-    expect(result.g).toBeLessThan(10);
-    expect(result.b).toBeLessThan(10);
+  it('returns {255,0,0} for hue 0 at full saturation and brightness', () => {
+    expect(colors.hueToRgb(0, 254, 254)).toEqual({ 'r': 255, 'g': 0, 'b': 0 });
   });
 
-  test('returns green for hue at 1/3 of range', () => {
-    const result = hueToRgb(21845, 254, 254);
-    expect(result.g).toBeGreaterThan(200);
+  it('returns {0,255,0} for hue 21845 at full saturation and brightness', () => {
+    expect(colors.hueToRgb(21845, 254, 254)).toEqual({ 'r': 0, 'g': 255, 'b': 0 });
   });
 
-  test('returns blue for hue at 2/3 of range', () => {
-    const result = hueToRgb(43690, 254, 254);
-    expect(result.b).toBeGreaterThan(200);
+  it('returns {0,0,255} for hue 43690 at full saturation and brightness', () => {
+    expect(colors.hueToRgb(43690, 254, 254)).toEqual({ 'r': 0, 'g': 0, 'b': 255 });
   });
 
-  test('returns low values for zero brightness', () => {
-    const result = hueToRgb(0, 254, 0);
-    expect(result).toEqual({ r: 0, g: 0, b: 0 });
+  it('returns {0,0,0} for hue 0 at zero brightness', () => {
+    expect(colors.hueToRgb(0, 254, 0)).toEqual({ 'r': 0, 'g': 0, 'b': 0 });
   });
 
-  test('returns white-ish for zero saturation', () => {
-    const result = hueToRgb(0, 0, 254);
-    expect(result.r).toEqual(result.g);
-    expect(result.g).toEqual(result.b);
+  it('returns {255,255,255} for hue 0 at zero saturation', () => {
+    expect(colors.hueToRgb(0, 0, 254)).toEqual({ 'r': 255, 'g': 255, 'b': 255 });
   });
 });
 
 describe('ctToRgb', () => {
-  test('returns warm color for low color temperature', () => {
-    const result = ctToRgb(500, 254);
-    expect(result.r).toBeGreaterThan(result.b);
+  it('returns {255,137,14} for 500 mireds at full brightness', () => {
+    expect(colors.ctToRgb(500, 254)).toEqual({ 'r': 255, 'g': 137, 'b': 14 });
   });
 
-  test('returns cool color for high color temperature', () => {
-    const result = ctToRgb(153, 254);
-    expect(result.b).toBeGreaterThanOrEqual(result.r - 50);
+  it('returns {255,255,251} for 153 mireds at full brightness', () => {
+    expect(colors.ctToRgb(153, 254)).toEqual({ 'r': 255, 'g': 255, 'b': 251 });
   });
 
-  test('returns darker values for lower brightness', () => {
-    const bright = ctToRgb(300, 254);
-    const dim = ctToRgb(300, 127);
-    expect(bright.r).toBeGreaterThan(dim.r);
-    expect(bright.g).toBeGreaterThan(dim.g);
-    expect(bright.b).toBeGreaterThan(dim.b);
+  it('returns {255,188,131} for 300 mireds at full brightness', () => {
+    expect(colors.ctToRgb(300, 254)).toEqual({ 'r': 255, 'g': 188, 'b': 131 });
+  });
+
+  it('returns {128,94,66} for 300 mireds at half brightness', () => {
+    expect(colors.ctToRgb(300, 127)).toEqual({ 'r': 128, 'g': 94, 'b': 66 });
   });
 });
 
 describe('xyToRgb', () => {
-  test('returns valid RGB values for typical xy coordinates', () => {
-    const result = xyToRgb(0.3, 0.3, 254);
-    expect(result.r).toBeGreaterThanOrEqual(0);
-    expect(result.r).toBeLessThanOrEqual(255);
-    expect(result.g).toBeGreaterThanOrEqual(0);
-    expect(result.g).toBeLessThanOrEqual(255);
-    expect(result.b).toBeGreaterThanOrEqual(0);
-    expect(result.b).toBeLessThanOrEqual(255);
+  it('returns {225,229,255} for xy 0.3,0.3 at full brightness', () => {
+    expect(colors.xyToRgb(0.3, 0.3, 254)).toEqual({ 'r': 225, 'g': 229, 'b': 255 });
   });
 
-  test('returns darker values for lower brightness', () => {
-    const bright = xyToRgb(0.3, 0.3, 254);
-    const dim = xyToRgb(0.3, 0.3, 50);
-    expect(bright.r + bright.g + bright.b).toBeGreaterThan(dim.r + dim.g + dim.b);
+  it('returns {120,122,137} for xy 0.3,0.3 at brightness 50', () => {
+    expect(colors.xyToRgb(0.3, 0.3, 50)).toEqual({ 'r': 120, 'g': 122, 'b': 137 });
   });
 });
 
 describe('rgbToHsl', () => {
-  test('returns hue 0 for red', () => {
-    const result = rgbToHsl(255, 0, 0);
-    expect(result.h).toBe(0);
-    expect(result.s).toBe(100);
+  it('returns hue 0 and saturation 100 for red 255,0,0', () => {
+    expect(colors.rgbToHsl(255, 0, 0)).toEqual({ 'h': 0, 's': 100, 'l': 50 });
   });
 
-  test('returns hue 120 for green', () => {
-    const result = rgbToHsl(0, 255, 0);
-    expect(result.h).toBe(120);
-    expect(result.s).toBe(100);
+  it('returns hue 120 and saturation 100 for green 0,255,0', () => {
+    expect(colors.rgbToHsl(0, 255, 0)).toEqual({ 'h': 120, 's': 100, 'l': 50 });
   });
 
-  test('returns hue 240 for blue', () => {
-    const result = rgbToHsl(0, 0, 255);
-    expect(result.h).toBe(240);
-    expect(result.s).toBe(100);
+  it('returns hue 240 and saturation 100 for blue 0,0,255', () => {
+    expect(colors.rgbToHsl(0, 0, 255)).toEqual({ 'h': 240, 's': 100, 'l': 50 });
   });
 
-  test('returns saturation 0 for grayscale', () => {
-    const result = rgbToHsl(128, 128, 128);
-    expect(result.s).toBe(0);
+  it('returns hue 0 and saturation 0 for gray 128,128,128', () => {
+    expect(colors.rgbToHsl(128, 128, 128)).toMatchObject({ 'h': 0, 's': 0 });
   });
 });
 
 describe('isCloseToWhite', () => {
-  test('returns true for ct colormode', () => {
-    expect(isCloseToWhite({ colormode: 'ct' })).toBe(true);
+  it('returns true for colormode ct', () => {
+    expect(colors.isCloseToWhite({ colormode: 'ct' })).toBe(true);
   });
 
-  test('returns true for low saturation in hs mode', () => {
-    expect(isCloseToWhite({ colormode: 'hs', sat: 50 })).toBe(true);
+  it('returns true for colormode hs with saturation 50', () => {
+    expect(colors.isCloseToWhite({ colormode: 'hs', sat: 50 })).toBe(true);
   });
 
-  test('returns false for high saturation in hs mode', () => {
-    expect(isCloseToWhite({ colormode: 'hs', sat: 200 })).toBe(false);
+  it('returns false for colormode hs with saturation 200', () => {
+    expect(colors.isCloseToWhite({ colormode: 'hs', sat: 200 })).toBe(false);
   });
 
-  test('returns true for low saturation in xy mode', () => {
-    expect(isCloseToWhite({ colormode: 'xy', sat: 50 })).toBe(true);
+  it('returns true for colormode xy with saturation 50', () => {
+    expect(colors.isCloseToWhite({ colormode: 'xy', sat: 50 })).toBe(true);
+  });
+
+  it('returns true for an unknown colormode', () => {
+    expect(colors.isCloseToWhite({ colormode: 'other', sat: 254 })).toBe(true);
   });
 });
 
 describe('getLightRgb', () => {
-  test('returns black when light is off', () => {
-    expect(getLightRgb({ on: false })).toEqual({ r: 0, g: 0, b: 0 });
+  it('returns {0,0,0} when the light is off', () => {
+    expect(colors.getLightRgb({ 'on': false })).toEqual({ 'r': 0, 'g': 0, 'b': 0 });
   });
 
-  test('uses ctToRgb for ct colormode', () => {
-    const result = getLightRgb({ on: true, colormode: 'ct', ct: 300, bri: 254 });
-    expect(result.r).toBeGreaterThan(0);
+  it('returns the ct color for colormode ct with ct 300', () => {
+    expect(colors.getLightRgb({ 'on': true, colormode: 'ct', 'ct': 300, bri: 254 })).toEqual({ 'r': 255, 'g': 188, 'b': 131 });
   });
 
-  test('uses xyToRgb for xy colormode', () => {
-    const result = getLightRgb({ on: true, colormode: 'xy', xy: [0.3, 0.3], bri: 254 });
-    expect(result.r).toBeGreaterThan(0);
+  it('returns the xy color for colormode xy with xy 0.3,0.3', () => {
+    expect(colors.getLightRgb({ 'on': true, colormode: 'xy', 'xy': [0.3, 0.3], bri: 254 })).toEqual({ 'r': 225, 'g': 229, 'b': 255 });
   });
 
-  test('uses hueToRgb for hs colormode', () => {
-    const result = getLightRgb({ on: true, colormode: 'hs', hue: 0, sat: 254, bri: 254 });
-    expect(result.r).toBeGreaterThan(200);
+  it('returns red for colormode hs with hue 0 and saturation 254', () => {
+    expect(colors.getLightRgb({ 'on': true, colormode: 'hs', hue: 0, sat: 254, bri: 254 })).toEqual({ 'r': 255, 'g': 0, 'b': 0 });
   });
 
-  test('returns grayscale when no colormode specified', () => {
-    const result = getLightRgb({ on: true, bri: 127 });
-    expect(result.r).toBe(result.g);
-    expect(result.g).toBe(result.b);
-    expect(result.r).toBeGreaterThan(100);
-    expect(result.r).toBeLessThan(140);
+  it('returns {0,0,0} for colormode hs with brightness 0 and no hue or saturation', () => {
+    expect(colors.getLightRgb({ 'on': true, colormode: 'hs', bri: 0 })).toEqual({ 'r': 0, 'g': 0, 'b': 0 });
+  });
+
+  it('returns gray {128,128,128} for brightness 127 without colormode', () => {
+    expect(colors.getLightRgb({ 'on': true, bri: 127 })).toEqual({ 'r': 128, 'g': 128, 'b': 128 });
+  });
+
+  it('returns gray {128,128,128} for colormode xy without xy coordinates', () => {
+    expect(colors.getLightRgb({ 'on': true, colormode: 'xy', bri: 127 })).toEqual({ 'r': 128, 'g': 128, 'b': 128 });
   });
 });
 
 describe('stateChanged', () => {
-  test('returns true when previous state is null', () => {
-    expect(stateChanged(null, { on: true })).toBe(true);
+  it('returns true when previous state is null', () => {
+    expect(colors.stateChanged(null, { 'on': true })).toBe(true);
   });
 
-  test('returns true when on state differs', () => {
-    expect(stateChanged({ on: true }, { on: false })).toBe(true);
+  it('returns true when on differs', () => {
+    expect(colors.stateChanged({ 'on': true }, { 'on': false })).toBe(true);
   });
 
-  test('returns true when brightness differs', () => {
-    expect(stateChanged({ on: true, bri: 100 }, { on: true, bri: 200 })).toBe(true);
+  it('returns true when brightness differs', () => {
+    expect(colors.stateChanged({ 'on': true, bri: 100 }, { 'on': true, bri: 200 })).toBe(true);
   });
 
-  test('returns true when hue differs', () => {
-    expect(stateChanged({ on: true, hue: 100 }, { on: true, hue: 200 })).toBe(true);
+  it('returns true when hue differs', () => {
+    expect(colors.stateChanged({ 'on': true, hue: 100 }, { 'on': true, hue: 200 })).toBe(true);
   });
 
-  test('returns true when xy differs', () => {
-    expect(stateChanged(
-      { on: true, xy: [0.3, 0.3] },
-      { on: true, xy: [0.4, 0.4] }
-    )).toBe(true);
+  it('returns true when xy differs', () => {
+    expect(colors.stateChanged({ 'on': true, 'xy': [0.3, 0.3] }, { 'on': true, 'xy': [0.4, 0.4] })).toBe(true);
   });
 
-  test('returns false when states are equal', () => {
-    const state = { on: true, bri: 100, hue: 0, sat: 254, ct: 200, colormode: 'hs' };
-    expect(stateChanged(state, { ...state })).toBe(false);
+  it('returns true when only the second xy coordinate differs', () => {
+    expect(colors.stateChanged({ 'on': true, 'xy': [0.3, 0.3] }, { 'on': true, 'xy': [0.3, 0.4] })).toBe(true);
+  });
+
+  it('returns false when states are equal', () => {
+    const state = { 'on': true, bri: 100, hue: 0, sat: 254, 'ct': 200, colormode: 'hs' };
+
+    expect(colors.stateChanged(state, { ...state })).toBe(false);
   });
 });
 
 describe('mapBrightness', () => {
-  test('maps 0 brightness to min', () => {
-    expect(mapBrightness(0, 20, 100)).toBe(20);
+  it('returns 20 for brightness 0 with range 20 to 100', () => {
+    expect(colors.mapBrightness(0, 20, 100)).toBe(20);
   });
 
-  test('maps max brightness to max', () => {
-    expect(mapBrightness(254, 20, 100)).toBe(100);
+  it('returns 100 for brightness 254 with range 20 to 100', () => {
+    expect(colors.mapBrightness(254, 20, 100)).toBe(100);
   });
 
-  test('maps mid brightness to mid range', () => {
-    const result = mapBrightness(127, 0, 100);
-    expect(result).toBeGreaterThan(40);
-    expect(result).toBeLessThan(60);
+  it('returns 50 for brightness 127 with range 0 to 100', () => {
+    expect(colors.mapBrightness(127, 0, 100)).toBe(50);
   });
 
-  test('uses default values when not provided', () => {
-    const result = mapBrightness(127);
-    expect(result).toBeGreaterThan(40);
-    expect(result).toBeLessThan(60);
+  it('returns 53 for brightness 127 with the default range', () => {
+    expect(colors.mapBrightness(127)).toBe(53);
   });
 });

@@ -13,43 +13,72 @@ import {
   addLog
 } from './state.js';
 
-let ws = null;
+let socket = null;
 let pingTimer = null;
 let lastPingTime = 0;
 const PING_INTERVAL = 3000;
+const RECONNECT_DELAY = 3000;
 
 // Store PM2.5 sensors separately so they persist across room updates
 let cachedPm25Sensors = [];
 
-function mergepm25IntoRooms(rooms) {
-  if (cachedPm25Sensors.length === 0) {
-    return rooms;
+export function initWebSocket() {
+  connectWebSocket();
+}
+
+export function sendMessage(type, payload = {}) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type, ...payload }));
   }
+}
 
-  const result = [...rooms];
-  const sensorsRoomIndex = result.findIndex(r => r.id === 'sensors');
+export function connectWebSocket() {
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  socket = new WebSocket(`${protocol}//${location.host}`);
 
-  if (sensorsRoomIndex >= 0) {
-    const sensorsRoom = { ...result[sensorsRoomIndex] };
-    const existingLights = sensorsRoom.lights || [];
-    const nonPm25 = existingLights.filter(s => s.category !== 'pm25');
-    sensorsRoom.lights = [...nonPm25, ...cachedPm25Sensors];
-    result[sensorsRoomIndex] = sensorsRoom;
-  } else {
-    result.push({
-      id: 'sensors',
-      name: 'Sensors',
-      lights: cachedPm25Sensors
-    });
+  socket.onopen = handleSocketOpen;
+  socket.onclose = handleSocketClose;
+  socket.onerror = handleSocketError;
+  socket.onmessage = handleSocketMessage;
+}
+
+function handleSocketOpen() {
+  addLog('WebSocket connected', 'success');
+  wsConnected.value = true;
+  startPingLoop();
+}
+
+function handleSocketClose() {
+  addLog('WebSocket disconnected', 'error');
+  stopPingLoop();
+  setTimeout(connectWebSocket, RECONNECT_DELAY);
+}
+
+function handleSocketError(err) {
+  console.error('WebSocket error:', err);
+}
+
+function handleSocketMessage(event) {
+  try {
+    const msg = JSON.parse(event.data);
+
+    if (msg.type === 'pong') {
+      handlePong(msg.timestamp);
+
+      return;
+    }
+
+    handleMessage(msg);
+  } catch (err) {
+    console.error('Failed to parse WebSocket message:', err);
   }
-
-  return result;
 }
 
 function startPingLoop() {
   if (pingTimer) {
     clearInterval(pingTimer);
   }
+
   pingTimer = setInterval(sendPing, PING_INTERVAL);
   sendPing();
 }
@@ -59,14 +88,15 @@ function stopPingLoop() {
     clearInterval(pingTimer);
     pingTimer = null;
   }
+
   wsLatency.value = null;
   wsConnected.value = false;
 }
 
 function sendPing() {
-  if (ws && ws.readyState === WebSocket.OPEN) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
     lastPingTime = Date.now();
-    ws.send(JSON.stringify({ type: 'ping', timestamp: lastPingTime }));
+    socket.send(JSON.stringify({ type: 'ping', timestamp: lastPingTime }));
   }
 }
 
@@ -77,119 +107,97 @@ function handlePong(timestamp) {
 }
 
 function handleMessage(msg) {
-  switch (msg.type) {
-    case 'rooms':
-      roomsState.value = mergepm25IntoRooms(msg.data);
-      break;
-    case 'roomba':
-      roombaState.value = { configured: true, connected: true, ...msg.data };
-      break;
-    case 'airpurifier':
-      if (Array.isArray(msg.data)) {
-        airPurifierState.value = msg.data;
-      } else if (msg.data) {
-        const index = msg.data.index || 0;
-        const current = [...airPurifierState.value];
-        current[index] = { ...current[index], ...msg.data };
-        airPurifierState.value = current;
-      }
-      break;
-    case 'homeconnect':
-      console.log('HomeConnect WS message:', msg.data);
-      homeConnectState.value = msg.data;
-      break;
-    case 'sync':
-      syncState.value = msg.data;
-      break;
+  const handler = MESSAGE_HANDLERS.get(msg.type);
 
-    case 'openwrt:status':
-      openwrtState.value = { ...openwrtState.value, routers: msg.data };
-      break;
-
-    case 'openwrt:devices':
-      openwrtState.value = { ...openwrtState.value, devices: msg.data };
-      break;
-
-    case 'openwrt:connections':
-      openwrtState.value = { ...openwrtState.value, connections: msg.data };
-      break;
-
-    case 'openwrt:state':
-      openwrtState.value = msg.data;
-      break;
-
-    case 'weather':
-      weatherState.value = msg.data;
-      break;
-
-    case 'transport':
-      transportState.value = msg.data;
-      break;
-
-    case 'pm25_sensors':
-      // Cache PM2.5 sensors and merge into rooms
-      if (msg.data && Array.isArray(msg.data)) {
-        cachedPm25Sensors = msg.data;
-        roomsState.value = mergepm25IntoRooms(roomsState.value || []);
-      }
-      break;
-
-    case 'log':
-      if (msg.data) {
-        const prefix = msg.data.source ? `[${msg.data.source}] ` : '';
-        addLog(`${prefix}${msg.data.message}`, msg.data.level || '');
-      }
-      break;
-
-    case 'resolver:status':
-    case 'resolver:progress':
-      resolverState.value = msg.data;
-      break;
+  if (handler) {
+    handler(msg.data);
   }
 }
 
-export function sendMessage(type, data = {}) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type, ...data }));
+function handleRooms(rooms) {
+  roomsState.value = mergepm25IntoRooms(rooms);
+}
+
+function handleRoomba(roomba) {
+  roombaState.value = { configured: true, connected: true, ...roomba };
+}
+
+function handleAirPurifier(purifier) {
+  if (Array.isArray(purifier)) {
+    airPurifierState.value = purifier;
+
+    return;
   }
+
+  if (!purifier) {
+    return;
+  }
+
+  const index = purifier.index || 0;
+  const current = [...airPurifierState.value];
+  current[index] = { ...current[index], ...purifier };
+  airPurifierState.value = current;
 }
 
-export function connectWebSocket() {
-  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${protocol}//${location.host}`);
-
-  ws.onopen = () => {
-    addLog('WebSocket connected', 'success');
-    wsConnected.value = true;
-    startPingLoop();
-  };
-
-  ws.onclose = () => {
-    addLog('WebSocket disconnected', 'error');
-    stopPingLoop();
-    setTimeout(connectWebSocket, 3000);
-  };
-
-  ws.onerror = (err) => {
-    console.error('WebSocket error:', err);
-  };
-
-  ws.onmessage = (event) => {
-    try {
-      const msg = JSON.parse(event.data);
-
-      if (msg.type === 'pong') {
-        handlePong(msg.timestamp);
-        return;
-      }
-
-      handleMessage(msg);
-    } catch (err) {
-      console.error('Failed to parse WebSocket message:', err);
-    }
-  };
+function handleHomeConnect(appliances) {
+  console.log('HomeConnect WS message:', appliances);
+  homeConnectState.value = appliances;
 }
 
-export function initWebSocket() {
-  connectWebSocket();
+function handlePm25Sensors(sensors) {
+  // Cache PM2.5 sensors and merge into rooms
+  if (!sensors || !Array.isArray(sensors)) {
+    return;
+  }
+
+  cachedPm25Sensors = sensors;
+  roomsState.value = mergepm25IntoRooms(roomsState.value || []);
 }
+
+function handleLog(entry) {
+  if (!entry) {
+    return;
+  }
+
+  const prefix = entry.source ? `[${entry.source}] ` : '';
+  addLog(`${prefix}${entry.message}`, entry.level || '');
+}
+
+function mergepm25IntoRooms(rooms) {
+  if (cachedPm25Sensors.length === 0) {
+    return rooms;
+  }
+
+  const sensorsRoomIndex = rooms.findIndex(room => room.id === 'sensors');
+
+  if (sensorsRoomIndex < 0) {
+    return [...rooms, { id: 'sensors', name: 'Sensors', lights: cachedPm25Sensors }];
+  }
+
+  const result = [...rooms];
+  const sensorsRoom = { ...result[sensorsRoomIndex] };
+  const existingLights = sensorsRoom.lights || [];
+  const nonPm25 = existingLights.filter(sensor => sensor.category !== 'pm25');
+  sensorsRoom.lights = [...nonPm25, ...cachedPm25Sensors];
+  result[sensorsRoomIndex] = sensorsRoom;
+
+  return result;
+}
+
+const MESSAGE_HANDLERS = new Map([
+  ['rooms', handleRooms],
+  ['roomba', handleRoomba],
+  ['airpurifier', handleAirPurifier],
+  ['homeconnect', handleHomeConnect],
+  ['sync', syncData => { syncState.value = syncData; }],
+  ['openwrt:status', routers => { openwrtState.value = { ...openwrtState.value, routers }; }],
+  ['openwrt:devices', devices => { openwrtState.value = { ...openwrtState.value, devices }; }],
+  ['openwrt:connections', connections => { openwrtState.value = { ...openwrtState.value, connections }; }],
+  ['openwrt:state', state => { openwrtState.value = state; }],
+  ['weather', weather => { weatherState.value = weather; }],
+  ['transport', transport => { transportState.value = transport; }],
+  ['pm25_sensors', handlePm25Sensors],
+  ['log', handleLog],
+  ['resolver:status', resolverStatus => { resolverState.value = resolverStatus; }],
+  ['resolver:progress', resolverStatus => { resolverState.value = resolverStatus; }]
+]);

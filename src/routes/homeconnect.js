@@ -1,9 +1,9 @@
 const express = require('express');
 const homeconnectService = require('../services/homeconnect');
 
+const { HTTP_BAD_REQUEST, HTTP_UNAUTHORIZED } = require('../lib/http-status');
+const asyncHandler = require('../lib/async-handler');
 const router = express.Router();
-
-const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 router.get('/status', (req, res) => {
   res.json({
@@ -14,9 +14,11 @@ router.get('/status', (req, res) => {
 
 router.post('/configure', (req, res) => {
   const { clientId, clientSecret } = req.body;
+
   if (!clientId || !clientSecret) {
-    return res.status(400).json({ error: 'Client ID and secret required' });
+    return res.status(HTTP_BAD_REQUEST).json({ error: 'Client ID and secret required' });
   }
+
   homeconnectService.configure(clientId, clientSecret);
   res.json({ success: true });
 });
@@ -30,7 +32,7 @@ router.get('/auth/url', (req, res) => {
     const authUrl = homeconnectService.getAuthUrl(redirectUri);
     res.json({ authUrl, redirectUri });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(HTTP_BAD_REQUEST).json({ error: err.message });
   }
 });
 
@@ -42,7 +44,7 @@ router.get('/auth/callback', asyncHandler(async (req, res) => {
   }
 
   if (!code) {
-    return res.status(400).send('Authorization code missing');
+    return res.status(HTTP_BAD_REQUEST).send('Authorization code missing');
   }
 
   const protocol = req.headers['x-forwarded-proto'] || req.protocol;
@@ -60,8 +62,9 @@ router.get('/auth/callback', asyncHandler(async (req, res) => {
 
 router.get('/appliances', asyncHandler(async (req, res) => {
   if (!homeconnectService.isAuthenticated()) {
-    return res.status(401).json({ error: 'Not authenticated' });
+    return res.status(HTTP_UNAUTHORIZED).json({ error: 'Not authenticated' });
   }
+
   const appliances = await homeconnectService.getAppliances();
   res.json(appliances);
 }));
@@ -73,8 +76,9 @@ router.get('/devices', asyncHandler(async (req, res) => {
 
 router.post('/refresh', asyncHandler(async (req, res) => {
   if (!homeconnectService.isAuthenticated()) {
-    return res.status(401).json({ error: 'Not authenticated' });
+    return res.status(HTTP_UNAUTHORIZED).json({ error: 'Not authenticated' });
   }
+
   const statuses = await homeconnectService.refreshNow();
   res.json(statuses);
 }));

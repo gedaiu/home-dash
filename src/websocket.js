@@ -1,134 +1,123 @@
-const WebSocket = require('ws');
+const websocketLib = require('ws');
 const url = require('url');
+const PERIODIC_SERVICES = require('./lib/periodic-services');
 const syncService = require('./services/sync');
-const hueService = require('./services/hue');
-const homeconnectService = require('./services/homeconnect');
-const roombaService = require('./services/roomba');
 const airpurifierService = require('./services/airpurifier');
 const openwrtService = require('./services/openwrt');
-const weatherService = require('./services/weather');
-const transportService = require('./services/transport');
-const storage = require('./services/storage');
-const geoip = require('./lib/geoip');
+
+const AGENT_PATH = '/ws/agent';
+const BROADCASTING_SERVICES = [syncService, airpurifierService, openwrtService, ...PERIODIC_SERVICES];
 
 let wss = null;
 const clients = new Set();
 
+const storage = require('./services/storage');
+
 function init(server) {
-  wss = new WebSocket.Server({ noServer: true });
+  wss = new websocketLib.Server({ noServer: true });
+  server.on('upgrade', routeUpgrade);
 
-  // Handle upgrade manually to support multiple WebSocket paths
-  server.on('upgrade', (request, socket, head) => {
-    const pathname = url.parse(request.url).pathname;
-
-    if (pathname === '/ws/agent') {
-      // OpenWrt agent connection
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        openwrtService.handleAgentConnection(ws);
-      });
-    } else {
-      // Default browser client connection
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        handleClientConnection(ws);
-      });
-    }
-  });
-
-  syncService.setBroadcast(broadcast);
-  hueService.setBroadcast(broadcast);
-  homeconnectService.setBroadcast(broadcast);
-  roombaService.setBroadcast(broadcast);
-  airpurifierService.setBroadcast(broadcast);
-  openwrtService.setBroadcast(broadcast);
-  weatherService.setBroadcast(broadcast);
-  transportService.setBroadcast(broadcast);
-  hueService.startPolling();
-  homeconnectService.startPolling();
-  roombaService.startPolling();
-  weatherService.startPolling();
-  transportService.startPolling();
+  BROADCASTING_SERVICES.forEach((service) => service.setBroadcast(broadcast));
+  PERIODIC_SERVICES.forEach((service) => service.startPolling());
 
   storage.onConfigChange(handleConfigChange);
   storage.startWatching();
 }
 
-function handleClientConnection(ws) {
-  clients.add(ws);
+function routeUpgrade(request, socket, head) {
+  const { pathname } = url.parse(request.url);
+  const isAgent = pathname === AGENT_PATH;
 
-  ws.send(JSON.stringify({
-    type: 'status',
-    data: syncService.getStatus()
-  }));
-
-  // Send current openwrt state
-  const openwrtState = openwrtService.getState();
-  if (openwrtState.routers.length > 0) {
-    ws.send(JSON.stringify({
-      type: 'openwrt:status',
-      data: openwrtState.routers
-    }));
-    ws.send(JSON.stringify({
-      type: 'openwrt:devices',
-      data: openwrtState.devices
-    }));
-    ws.send(JSON.stringify({
-      type: 'openwrt:connections',
-      data: openwrtState.connections
-    }));
-  }
-
-  // Send current weather state
-  const weatherState = weatherService.getStatus();
-  if (weatherState) {
-    ws.send(JSON.stringify({
-      type: 'weather',
-      data: weatherState
-    }));
-  }
-
-  // Send current transport state
-  const transportState = transportService.getStatus();
-  if (transportState) {
-    ws.send(JSON.stringify({
-      type: 'transport',
-      data: transportState
-    }));
-  }
-
-  ws.on('message', (message) => {
-    try {
-      const data = JSON.parse(message);
-      handleMessage(ws, data);
-    } catch {
-      // Ignore invalid messages
-    }
-  });
-
-  ws.on('close', () => {
-    clients.delete(ws);
-  });
-
-  ws.on('error', () => {
-    clients.delete(ws);
+  wss.handleUpgrade(request, socket, head, (connection) => {
+    return isAgent ? openwrtService.handleAgentConnection(connection) : handleClientConnection(connection);
   });
 }
 
-function handleConfigChange(config) {
+function handleClientConnection(connection) {
+  clients.add(connection);
+
+  buildInitialMessages().forEach((message) => connection.send(JSON.stringify(message)));
+
+  connection.on('message', (raw) => handleRawMessage(connection, raw));
+  connection.on('close', () => clients.delete(connection));
+  connection.on('error', () => clients.delete(connection));
+}
+
+const weatherService = require('./services/weather');
+const transportService = require('./services/transport');
+
+function buildInitialMessages() {
+  return [
+    ...toMessages('status', syncService.getStatus()),
+    ...buildOpenwrtMessages(openwrtService.getState()),
+    ...toMessages('weather', weatherService.getStatus()),
+    ...toMessages('transport', transportService.getStatus())
+  ];
+}
+
+function buildOpenwrtMessages(openwrtState) {
+  if (openwrtState.routers.length === 0) {
+    return [];
+  }
+
+  return [
+    ...toMessages('openwrt:status', openwrtState.routers),
+    ...toMessages('openwrt:devices', openwrtState.devices),
+    ...toMessages('openwrt:connections', openwrtState.connections)
+  ];
+}
+
+function toMessages(type, payload) {
+  return payload ? [{ type, data: payload }] : [];
+}
+
+function handleRawMessage(connection, raw) {
+  try {
+    handleMessage(connection, JSON.parse(raw));
+  } catch {
+    // Ignore invalid messages
+  }
+}
+
+const geoip = require('./lib/geoip');
+
+const MESSAGE_HANDLERS = new Map([
+  ['ping', (connection, message) => {
+    connection.send(JSON.stringify({ type: 'pong', timestamp: message.timestamp }));
+  }],
+  ['subscribe', (connection) => {
+    connection.send(JSON.stringify({ type: 'status', data: syncService.getStatus() }));
+  }],
+  ['resolver:status', (connection) => {
+    connection.send(JSON.stringify({ type: 'resolver:status', data: geoip.getResolverStatus() }));
+  }],
+  ['resolver:start', startResolver]
+]);
+
+function handleMessage(connection, message) {
+  const handler = MESSAGE_HANDLERS.get(message.type);
+
+  if (handler) {
+    handler(connection, message);
+  }
+}
+
+function startResolver() {
+  geoip.resolveAllHostnames((progress) => {
+    broadcast({ type: 'resolver:progress', data: progress });
+  }).then(() => {
+    openwrtService.refreshConnectionEnrichment();
+  });
+}
+
+function handleConfigChange() {
   console.log('[websocket] Config changed, reloading services...');
 
-  hueService.stopPolling();
-  homeconnectService.stopPolling();
-  roombaService.stopPolling();
+  PERIODIC_SERVICES.forEach((service) => service.stopPolling());
   airpurifierService.stopAllPolling();
-  weatherService.stopPolling();
-  transportService.stopPolling();
 
-  hueService.startPolling();
-  homeconnectService.startPolling();
-  roombaService.startPolling();
+  PERIODIC_SERVICES.forEach((service) => service.startPolling());
   airpurifierService.startAllPolling();
-  weatherService.startPolling();
-  transportService.startPolling();
 
   broadcast({
     type: 'config_changed',
@@ -141,59 +130,25 @@ function handleConfigChange(config) {
   });
 }
 
-function handleMessage(ws, data) {
-  switch (data.type) {
-    case 'ping':
-      ws.send(JSON.stringify({ type: 'pong', timestamp: data.timestamp }));
-      break;
-    case 'subscribe':
-      ws.send(JSON.stringify({
-        type: 'status',
-        data: syncService.getStatus()
-      }));
-      break;
-    case 'resolver:status':
-      ws.send(JSON.stringify({
-        type: 'resolver:status',
-        data: geoip.getResolverStatus()
-      }));
-      break;
-    case 'resolver:start':
-      geoip.resolveAllHostnames((progress) => {
-        broadcast({
-          type: 'resolver:progress',
-          data: progress
-        });
-      }).then(() => {
-        // Re-enrich connections with fresh GeoIP data including hostnames
-        openwrtService.refreshConnectionEnrichment();
-      });
-      break;
-  }
-}
-
 function broadcast(message) {
   const payload = JSON.stringify(message);
 
   for (const client of clients) {
-    if (client.readyState === WebSocket.OPEN) {
+    if (client.readyState === websocketLib.OPEN) {
       client.send(payload);
     }
   }
 }
 
 function close() {
-  hueService.stopPolling();
-  homeconnectService.stopPolling();
-  roombaService.stopPolling();
+  PERIODIC_SERVICES.forEach((service) => service.stopPolling());
   airpurifierService.stopAllPolling();
-  weatherService.stopPolling();
-  transportService.stopPolling();
   storage.stopWatching();
 
   for (const client of clients) {
     client.terminate();
   }
+
   clients.clear();
 
   if (wss) {

@@ -3,77 +3,84 @@ const aesjs = require('aes-js');
 
 const SECRET_KEY = 'JiangPan';
 
+const KEY_LENGTH = 16;
+
 function deriveKeyIv(salt) {
   const hash = crypto.createHash('md5')
     .update(Buffer.from(SECRET_KEY + salt, 'utf-8'))
     .digest('hex')
     .toUpperCase();
 
-  const key = Buffer.from(hash.substring(0, 16), 'utf-8');
-  const iv = Buffer.from(hash.substring(16), 'utf-8');
+  const key = Buffer.from(hash.substring(0, KEY_LENGTH), 'utf-8');
+  const initVector = Buffer.from(hash.substring(KEY_LENGTH), 'utf-8');
 
-  return { key, iv };
+  return { key, 'iv': initVector };
 }
 
+const SALT_LENGTH = 8;
+const DIGEST_LENGTH = 64;
+const MIN_PAYLOAD_LENGTH = SALT_LENGTH + DIGEST_LENGTH;
+
 function decrypt(hexPayload) {
-  if (!hexPayload || hexPayload.length < 72) {
+  if (!hexPayload || hexPayload.length < MIN_PAYLOAD_LENGTH) {
     return null;
   }
 
-  const salt = hexPayload.slice(0, 8);
-  const ciphertextHex = hexPayload.slice(8, -64);
-  const digestHex = hexPayload.slice(-64);
+  const salt = hexPayload.slice(0, SALT_LENGTH);
+  const ciphertextHex = hexPayload.slice(SALT_LENGTH, -DIGEST_LENGTH);
 
-  if (!ciphertextHex || ciphertextHex.length === 0) {
+  if (!ciphertextHex) {
     return null;
   }
 
-  const computedDigest = crypto.createHash('sha256')
-    .update(salt + ciphertextHex)
-    .digest('hex')
-    .toUpperCase();
+  warnOnDigestMismatch({ salt, ciphertextHex, digestHex: hexPayload.slice(-DIGEST_LENGTH) });
+
+  return JSON.parse(decryptCiphertext(salt, ciphertextHex));
+}
+
+function warnOnDigestMismatch({ salt, ciphertextHex, digestHex }) {
+  const computedDigest = sha256Upper(salt + ciphertextHex);
 
   if (computedDigest !== digestHex.toUpperCase()) {
     console.warn('[philips-coap] Digest mismatch in received payload');
   }
-
-  const { key, iv } = deriveKeyIv(salt);
-  const ciphertext = Buffer.from(ciphertextHex, 'hex');
-  const aesCbc = new aesjs.ModeOfOperation.cbc(key, iv);
-  const decrypted = aesCbc.decrypt(ciphertext);
-
-  const plaintext = aesjs.utils.utf8.fromBytes(decrypted);
-  const cleaned = plaintext.replace(/[\u0000-\u001f]+/g, '');
-
-  return JSON.parse(cleaned);
 }
 
-function encrypt(data, counter) {
-  const jsonStr = JSON.stringify(data);
-  const jsonBytes = Buffer.from(jsonStr, 'utf-8');
+function sha256Upper(text) {
+  return crypto.createHash('sha256').update(text).digest('hex').toUpperCase();
+}
 
-  const blockSize = 16;
-  const padLength = blockSize - (jsonBytes.length % blockSize);
+function decryptCiphertext(salt, ciphertextHex) {
+  const { key, iv: initVector } = deriveKeyIv(salt);
+  const aesCbc = new aesjs.ModeOfOperation.cbc(key, initVector);
+  const decrypted = aesCbc.decrypt(Buffer.from(ciphertextHex, 'hex'));
+  const { utf8 } = aesjs.utils;
+
+  return utf8.fromBytes(decrypted).replace(/[\u0000-\u001f]+/g, '');
+}
+
+const AES_BLOCK_SIZE = 16;
+
+function encrypt(payload, counter) {
+  const jsonBytes = Buffer.from(JSON.stringify(payload), 'utf-8');
+  const padLength = AES_BLOCK_SIZE - (jsonBytes.length % AES_BLOCK_SIZE);
   const padded = Buffer.concat([jsonBytes, Buffer.alloc(padLength, padLength)]);
 
-  const { key, iv } = deriveKeyIv(counter);
-  const aesCbc = new aesjs.ModeOfOperation.cbc(key, iv);
-  const encrypted = aesCbc.encrypt(padded);
+  const { key, iv: initVector } = deriveKeyIv(counter);
+  const aesCbc = new aesjs.ModeOfOperation.cbc(key, initVector);
+  const ciphertextHex = Buffer.from(aesCbc.encrypt(padded)).toString('hex').toUpperCase();
 
-  const ciphertextHex = Buffer.from(encrypted).toString('hex').toUpperCase();
-  const digest = crypto.createHash('sha256')
-    .update(counter + ciphertextHex)
-    .digest('hex')
-    .toUpperCase();
-
-  return counter + ciphertextHex + digest;
+  return counter + ciphertextHex + sha256Upper(counter + ciphertextHex);
 }
+
+const COUNTER_BYTES = 4;
 
 function incrementCounter(counter) {
   const buf = Buffer.from(counter, 'hex');
   const value = (buf.readUInt32BE(0) + 1) >>> 0;
-  const outBuf = Buffer.allocUnsafe(4);
+  const outBuf = Buffer.allocUnsafe(COUNTER_BYTES);
   outBuf.writeUInt32BE(value, 0);
+
   return outBuf.toString('hex').toUpperCase();
 }
 
@@ -90,56 +97,32 @@ function buildCommand(key, value) {
   };
 }
 
+const MODE_LABELS = {
+  'P': 'AUTO',
+  'AG': 'ALLERGEN',
+  'GT': 'GENTLE',
+  'S': 'SLEEP',
+  'M': 'MANUAL',
+  'T': 'TURBO'
+};
+
+const SPEEDS_THREE_STEPS = ['s', '1', '2', '3', 't'];
+const SPEEDS_TWO_STEPS = ['s', '1', '2', 't'];
+
+function capabilities({ modeValues, speeds, hasManualMode = false }) {
+  return {
+    modes: modeValues.map(value => ({ value, label: MODE_LABELS[value] })),
+    speeds: [...speeds],
+    hasManualMode
+  };
+}
+
 const MODEL_CAPABILITIES = {
-  'default': {
-    modes: [
-      { value: 'P', label: 'AUTO' },
-      { value: 'S', label: 'SLEEP' },
-      { value: 'T', label: 'TURBO' }
-    ],
-    speeds: ['s', '1', '2', 't'],
-    hasManualMode: false
-  },
-  'AC2729': {
-    modes: [
-      { value: 'P', label: 'AUTO' },
-      { value: 'AG', label: 'ALLERGEN' },
-      { value: 'S', label: 'SLEEP' },
-      { value: 'M', label: 'MANUAL' },
-      { value: 'T', label: 'TURBO' }
-    ],
-    speeds: ['s', '1', '2', '3', 't'],
-    hasManualMode: true
-  },
-  'AC2889': {
-    modes: [
-      { value: 'P', label: 'AUTO' },
-      { value: 'AG', label: 'ALLERGEN' },
-      { value: 'S', label: 'SLEEP' },
-      { value: 'T', label: 'TURBO' }
-    ],
-    speeds: ['s', '1', '2', 't'],
-    hasManualMode: false
-  },
-  'AC3829': {
-    modes: [
-      { value: 'P', label: 'AUTO' },
-      { value: 'S', label: 'SLEEP' },
-      { value: 'T', label: 'TURBO' }
-    ],
-    speeds: ['s', '1', '2', 't'],
-    hasManualMode: false
-  },
-  'AC2939': {
-    modes: [
-      { value: 'P', label: 'AUTO' },
-      { value: 'GT', label: 'GENTLE' },
-      { value: 'S', label: 'SLEEP' },
-      { value: 'T', label: 'TURBO' }
-    ],
-    speeds: ['s', '1', '2', '3', 't'],
-    hasManualMode: false
-  }
+  'default': capabilities({ modeValues: ['P', 'S', 'T'], speeds: SPEEDS_TWO_STEPS }),
+  'AC2729': capabilities({ modeValues: ['P', 'AG', 'S', 'M', 'T'], speeds: SPEEDS_THREE_STEPS, hasManualMode: true }),
+  'AC2889': capabilities({ modeValues: ['P', 'AG', 'S', 'T'], speeds: SPEEDS_TWO_STEPS }),
+  'AC3829': capabilities({ modeValues: ['P', 'S', 'T'], speeds: SPEEDS_TWO_STEPS }),
+  'AC2939': capabilities({ modeValues: ['P', 'GT', 'S', 'T'], speeds: SPEEDS_THREE_STEPS })
 };
 
 function getModelCapabilities(modelId) {
@@ -154,33 +137,40 @@ function getModelCapabilities(modelId) {
   return MODEL_CAPABILITIES[modelKey] || MODEL_CAPABILITIES['default'];
 }
 
-function parseStatus(data) {
-  const reported = data?.state?.reported || data;
-  const modelId = reported.modelid || null;
-  const capabilities = getModelCapabilities(modelId);
+function parseStatus(payload) {
+  const reported = payload?.state?.reported || payload;
+  const modelId = falsyToNull(reported.modelid);
 
   return {
-    name: reported.name || null,
+    name: falsyToNull(reported.name),
     model: modelId,
     pwr: reported.pwr,
-    mode: reported.mode || null,
-    om: reported.om || null,
-    pm25: reported.pm25 ?? null,
-    iaql: reported.iaql ?? null,
-    tvoc: reported.tvoc ?? null,
-    aqil: reported.aqil ?? null,
+    mode: falsyToNull(reported.mode),
+    'om': falsyToNull(reported.om),
+    pm25: undefinedToNull(reported.pm25),
+    iaql: undefinedToNull(reported.iaql),
+    tvoc: undefinedToNull(reported.tvoc),
+    aqil: undefinedToNull(reported.aqil),
     uil: reported.uil,
-    cl: reported.cl,
-    fltsts0: reported.fltsts0 ?? null,
-    flttotal0: reported.flttotal0 ?? null,
-    fltsts1: reported.fltsts1 ?? null,
-    flttotal1: reported.flttotal1 ?? null,
-    fltsts2: reported.fltsts2 ?? null,
-    flttotal2: reported.flttotal2 ?? null,
-    runtime: reported.Runtime ?? null,
-    err: reported.err ?? null,
-    capabilities
+    'cl': reported.cl,
+    fltsts0: undefinedToNull(reported.fltsts0),
+    flttotal0: undefinedToNull(reported.flttotal0),
+    fltsts1: undefinedToNull(reported.fltsts1),
+    flttotal1: undefinedToNull(reported.flttotal1),
+    fltsts2: undefinedToNull(reported.fltsts2),
+    flttotal2: undefinedToNull(reported.flttotal2),
+    runtime: undefinedToNull(reported.Runtime),
+    err: undefinedToNull(reported.err),
+    capabilities: getModelCapabilities(modelId)
   };
+}
+
+function falsyToNull(value) {
+  return value || null;
+}
+
+function undefinedToNull(value) {
+  return value ?? null;
 }
 
 module.exports = {

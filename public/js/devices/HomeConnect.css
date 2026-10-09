@@ -2,17 +2,17 @@
   display: flex;
   justify-content: space-between;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 .appliance-item {
   border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 10px;
+  border-radius: var(--radius-3);
+  padding: var(--space-10);
 }
 
 .appliance-item.running {
-  border-color: #00ff88;
+  border-color: var(--color-green-bright);
 }
 
 .appliance-item.offline {
@@ -23,8 +23,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: var(--space-8);
+  margin-bottom: var(--space-8);
 }
 
 .appliance-header i {
@@ -34,7 +34,7 @@
 
 .appliance-name {
   flex: 1;
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 .appliance-stats {
@@ -42,16 +42,16 @@
   justify-content: space-between;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  margin-top: 8px;
+  gap: var(--space-12);
+  margin-top: var(--space-8);
 }
 
 .appliance-stat {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 4px;
-  font-size: 14px;
+  gap: var(--space-4);
+  font-size: var(--text-md);
 }
 
 .appliance-stat i {

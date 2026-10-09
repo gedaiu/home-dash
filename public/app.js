@@ -288,6 +288,7 @@ function makeEditableTitle(element, panelKey, defaultName) {
 
     const saveAndClose = async () => {
       const newName = input.value.trim();
+
       if (newName && newName !== defaultName) {
         await API.panels.setName(panelKey, newName);
         panelNames[panelKey] = newName;
@@ -329,6 +330,7 @@ function attachEditableTitles() {
     const panelKey = panel.dataset.panelKey;
     const defaultName = panel.dataset.defaultName;
     const titleEl = panel.querySelector('.panel-title');
+
     if (titleEl && panelKey && defaultName) {
       makeEditableTitle(titleEl, panelKey, defaultName);
     }
@@ -339,6 +341,7 @@ function startPingLoop() {
   if (pingTimer) {
     clearInterval(pingTimer);
   }
+
   pingTimer = setInterval(sendPing, PING_INTERVAL);
   sendPing();
 }
@@ -348,6 +351,7 @@ function stopPingLoop() {
     clearInterval(pingTimer);
     pingTimer = null;
   }
+
   pingHistory = [];
   updateEkgDisconnected();
 }
@@ -362,9 +366,11 @@ function sendPing() {
 function handlePong(timestamp) {
   const latency = Date.now() - timestamp;
   pingHistory.push(latency);
+
   if (pingHistory.length > PING_HISTORY_LENGTH) {
     pingHistory.shift();
   }
+
   updateEkgDisplay(latency);
 }
 
@@ -414,11 +420,13 @@ function getEkgYAtX(x, amplitude) {
   if (beatX <= 14) { return baseY - 8 * amplitude + (8 * amplitude) * ((beatX - 12) / 2); }
   if (beatX <= 17) { return baseY + (5 * amplitude) * ((beatX - 14) / 3); }
   if (beatX <= 20) { return baseY + 5 * amplitude - (5 * amplitude) * ((beatX - 17) / 3); }
+
   return baseY;
 }
 
 function updateEkgGradient() {
   const gradient = document.getElementById('ekg-gradient');
+
   if (!gradient) {
     return;
   }
@@ -481,12 +489,14 @@ function animateEkg(timestamp) {
 
   if (!dot || !maskRect) {
     ekgAnimationFrame = requestAnimationFrame(animateEkg);
+
     return;
   }
 
   if (!ekgLastTime) {
     ekgLastTime = timestamp;
     ekgAnimationFrame = requestAnimationFrame(animateEkg);
+
     return;
   }
 
@@ -654,6 +664,7 @@ function updateSyncStatus(status) {
     btnToggle.classList.add('btn-start');
     btnToggle.classList.remove('btn-stop');
   }
+
   lucide.createIcons({ nodes: [btnToggle] });
 
   if (status.lastSync) {
@@ -685,6 +696,7 @@ async function loadHueBridge() {
           </p>
         </div>
       `;
+
       return;
     }
 
@@ -731,6 +743,7 @@ async function loadNanoleaf() {
           </p>
         </div>
       `;
+
       return;
     }
 
@@ -782,6 +795,7 @@ function getBatteryIcon(level) {
     'medium': 'battery-medium',
     'low': 'battery-low'
   };
+
   return icons[level] || 'battery';
 }
 
@@ -798,6 +812,7 @@ function getRoombaPhaseDisplay(phase) {
     'error': { label: 'ERROR', class: 'error' },
     'cancelled': { label: 'CANCELLED', class: 'offline' }
   };
+
   return displays[phase] || { label: phase?.toUpperCase() || 'UNKNOWN', class: 'offline' };
 }
 
@@ -813,6 +828,7 @@ function renderRoombaHeaderControls(status) {
   const isCharging = status.mission?.phase === 'charging';
 
   let controlButtons = '';
+
   if (isActive) {
     controlButtons = `
       <button class="btn-icon" onclick="pauseRoomba()" title="Pause">
@@ -899,6 +915,7 @@ function renderRoombaPanel(status) {
   const batteryPercent = status.battery?.percent ?? '--';
 
   let binHtml = '';
+
   if (status.bin) {
     const binStatus = status.bin.full ? 'FULL' : 'OK';
     const binClass = status.bin.full ? 'warning' : 'online';
@@ -911,6 +928,7 @@ function renderRoombaPanel(status) {
   }
 
   let lifetimeHtml = '';
+
   if (status.lifetime) {
     const totalTime = status.lifetime.totalHours > 0
       ? `${status.lifetime.totalHours}h ${status.lifetime.totalMinutes}m`
@@ -935,6 +953,7 @@ function renderRoombaPanel(status) {
   }
 
   let settingsHtml = '';
+
   if (status.settings) {
     const activeSettings = [];
     if (status.settings.carpetBoost) activeSettings.push('Carpet Boost');
@@ -955,6 +974,7 @@ function renderRoombaPanel(status) {
   }
 
   let lastCommandHtml = '';
+
   if (status.lastCommand?.command) {
     const cmdTime = status.lastCommand.time
       ? new Date(status.lastCommand.time).toLocaleString()
@@ -975,6 +995,7 @@ function renderRoombaPanel(status) {
   }
 
   let deviceInfoHtml = '';
+
   if (status.deviceInfo?.sku) {
     deviceInfoHtml = `
       <div class="roomba-section">
@@ -1033,6 +1054,7 @@ async function loadRoomba() {
     controls.innerHTML = renderRoombaHeaderControls(status);
 
     const titleEl = panel.querySelector('.panel-title');
+
     if (titleEl) {
       titleEl.textContent = getPanelDisplayName('roomba', 'ROOMBA');
     }
@@ -1055,6 +1077,7 @@ function updateRoomba(status) {
   controls.innerHTML = renderRoombaHeaderControls(fullStatus);
 
   const titleEl = panel.querySelector('.panel-title');
+
   if (titleEl) {
     titleEl.textContent = getPanelDisplayName('roomba', 'ROOMBA');
   }
@@ -1066,6 +1089,7 @@ function updateRoomba(status) {
 function updatePm25Sensors(sensors) {
   pm25Sensors = sensors || [];
   const sensorsContent = $('#sensors-content');
+
   if (!sensorsContent) {
     return;
   }
@@ -1126,12 +1150,15 @@ function getAirQualityLabel(iaql) {
   if (iaql <= 3) {
     return 'GOOD';
   }
+
   if (iaql <= 6) {
     return 'MODERATE';
   }
+
   if (iaql <= 9) {
     return 'POOR';
   }
+
   return 'VERY POOR';
 }
 
@@ -1139,12 +1166,15 @@ function getAirQualityClass(iaql) {
   if (iaql <= 3) {
     return 'good';
   }
+
   if (iaql <= 6) {
     return 'moderate';
   }
+
   if (iaql <= 9) {
     return 'poor';
   }
+
   return 'very-poor';
 }
 
@@ -1156,6 +1186,7 @@ function getModeLabel(mode) {
     'T': 'TURBO',
     'S': 'SLEEP'
   };
+
   return modes[mode] || mode;
 }
 
@@ -1163,15 +1194,18 @@ function getFanLabel(om) {
   if (om === 's') {
     return 'SLEEP';
   }
+
   if (om === 't') {
     return 'TURBO';
   }
+
   return 'SPEED ' + om;
 }
 
 function renderFilterStatus(fltsts, flttotal, label) {
   const percent = flttotal > 0 ? Math.round((fltsts / flttotal) * 100) : 0;
   const statusClass = percent > 30 ? 'good' : percent > 10 ? 'warning' : 'critical';
+
   return '<div class="info-row">' +
     '<span class="label">' + label + ':</span>' +
     '<span class="value filter-value">' +
@@ -1204,6 +1238,7 @@ function renderAirPurifierDevice(device, index) {
   }
 
   const hasStatus = device.pwr !== undefined;
+
   if (!hasStatus) {
     return '<section class="panel" data-panel-key="' + panelKey + '" data-default-name="' + defaultName + '">' +
       '<div class="panel-header">' +
@@ -1366,6 +1401,7 @@ async function confirmAddPurifier() {
 
   if (!ip) {
     log('Please enter an IP address', 'error');
+
     return;
   }
 
@@ -1373,6 +1409,7 @@ async function confirmAddPurifier() {
 
   try {
     const result = await API.airpurifier.add(ip, name);
+
     if (result.success) {
       hideModal();
       log('Air purifier added at ' + ip, 'success');
@@ -1411,11 +1448,14 @@ function formatRemainingTime(seconds) {
   if (!seconds) {
     return '--:--';
   }
+
   const hours = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
+
   if (hours > 0) {
     return `${hours}h ${mins}m`;
   }
+
   return `${mins}m`;
 }
 
@@ -1435,21 +1475,27 @@ function formatTimeAgo(isoString) {
   if (diffSec < 60) {
     return 'just now';
   }
+
   if (diffMin === 1) {
     return '1 min ago';
   }
+
   if (diffMin < 60) {
     return `${diffMin} min ago`;
   }
+
   if (diffHour === 1) {
     return '1 hour ago';
   }
+
   if (diffHour < 24) {
     return `${diffHour} hours ago`;
   }
+
   if (diffDay === 1) {
     return '1 day ago';
   }
+
   return `${diffDay} days ago`;
 }
 
@@ -1459,6 +1505,7 @@ function getLastMotionDetections(history, count) {
   }
 
   const detections = [];
+
   for (let i = history.length - 1; i >= 0 && detections.length < count; i--) {
     if (history[i].v === 1) {
       const time = new Date(history[i].t);
@@ -1483,6 +1530,7 @@ function getOperationStateDisplay(state) {
     'error': { label: 'ERROR', class: 'error' },
     'aborting': { label: 'STOPPING', class: 'pending' }
   };
+
   return displays[state] || { label: state?.toUpperCase() || 'UNKNOWN', class: 'offline' };
 }
 
@@ -1501,6 +1549,7 @@ function getApplianceIcon(type) {
     'Cooktop': 'flame',
     'CleaningRobot': 'bot'
   };
+
   return icons[type] || 'cpu';
 }
 
@@ -1537,10 +1586,12 @@ function renderHomeConnectPanel(device) {
       : '<span class="status-badge online">OK</span>';
 
     let programHtml = '';
+
     if (status.program) {
       const prog = status.program;
 
       let delayedStartHtml = '';
+
       if (prog.startInRelative && status.operationState === 'delayed') {
         delayedStartHtml = `
           <div class="info-row">
@@ -1551,6 +1602,7 @@ function renderHomeConnectPanel(device) {
       }
 
       let progressHtml = '';
+
       if (prog.progress !== null && prog.progress !== undefined) {
         progressHtml = `
           <div class="info-row">
@@ -1566,9 +1618,11 @@ function renderHomeConnectPanel(device) {
       }
 
       let timeHtml = '';
+
       if (prog.remainingTime) {
         const elapsed = prog.elapsedTime ? formatRemainingTime(prog.elapsedTime) : null;
         const remaining = formatRemainingTime(prog.remainingTime);
+
         if (elapsed) {
           timeHtml = `
             <div class="info-row">
@@ -1598,6 +1652,7 @@ function renderHomeConnectPanel(device) {
     }
 
     let remoteHtml = '';
+
     if (status.localControlActive) {
       remoteHtml = `
         <div class="info-row">
@@ -1704,6 +1759,7 @@ async function loadHomeConnect() {
       ));
       lucide.createIcons();
       $('#discover-homeconnect').addEventListener('click', discoverHomeConnect);
+
       return;
     }
 
@@ -1715,6 +1771,7 @@ async function loadHomeConnect() {
       ));
       lucide.createIcons();
       $('#discover-homeconnect').addEventListener('click', discoverHomeConnect);
+
       return;
     }
 
@@ -1729,6 +1786,7 @@ async function loadHomeConnect() {
       ));
       lucide.createIcons();
       $('#discover-homeconnect').addEventListener('click', discoverHomeConnect);
+
       return;
     }
 
@@ -1811,6 +1869,7 @@ async function discoverHomeConnect() {
       <button class="btn" onclick="hideModal()">CANCEL</button>
       <button class="btn btn-start" onclick="configureHomeConnect()">SAVE</button>
     `);
+
     return;
   }
 
@@ -1826,6 +1885,7 @@ async function discoverHomeConnect() {
       <button class="btn" onclick="hideModal()">CANCEL</button>
       <button class="btn btn-start" onclick="startHomeConnectAuth()">AUTHORIZE</button>
     `);
+
     return;
   }
 
@@ -1851,6 +1911,7 @@ async function configureHomeConnect() {
 
   if (!clientId || !clientSecret) {
     log('Client ID and Secret are required', 'error');
+
     return;
   }
 
@@ -1895,6 +1956,7 @@ function getDeviceIcon(category, archetype) {
   if (archetype && ARCHETYPE_ICONS[archetype]) {
     return ARCHETYPE_ICONS[archetype];
   }
+
   return CATEGORY_ICONS[category] || 'cpu';
 }
 
@@ -1912,6 +1974,7 @@ function getLast24hValues(history) {
   }
 
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+
   return history.filter(e => e.t >= cutoff).map(e => e.v);
 }
 
@@ -1935,6 +1998,7 @@ function renderSparkline(history, color) {
   const points = values.map((val, i) => {
     const x = (i / (values.length - 1)) * 100;
     const y = 100 - ((val - min) / range) * 100;
+
     return `${x},${y}`;
   }).join(' ');
 
@@ -1960,6 +2024,7 @@ function renderSensorPanel(sensor) {
   if (sensor.category === 'temperature' && sensor.state.temperature !== undefined) {
     value = sensor.state.temperature.toFixed(1);
     unit = '°C';
+
     if (sensor.dailyStats) {
       minMax = `<span class="sensor-minmax">${sensor.dailyStats.min.toFixed(1)} / ${sensor.dailyStats.max.toFixed(1)}</span>`;
     }
@@ -1973,6 +2038,7 @@ function renderSensorPanel(sensor) {
   } else if (sensor.category === 'pm25' && sensor.state.pm25 !== undefined) {
     value = sensor.state.pm25;
     unit = ' µg/m³';
+
     if (sensor.dailyStats) {
       minMax = `<span class="sensor-minmax">${sensor.dailyStats.min} / ${sensor.dailyStats.max}</span>`;
     }
@@ -1990,8 +2056,10 @@ function renderSensorPanel(sensor) {
   const sparklineColor = colorMap[sensor.category] || '#ff8c00';
 
   let bottomContent = renderSparkline(sensor.history, sparklineColor);
+
   if (sensor.category === 'motion') {
     const detections = getLastMotionDetections(sensor.history, 8);
+
     if (detections.length > 0) {
       bottomContent = `<div class="motion-detections">${detections.map(d => `<span>${d}</span>`).join('')}</div>`;
     } else if (sensor.state.lastupdated) {
@@ -2085,6 +2153,7 @@ async function loadRooms() {
 
     if (rooms.length === 0) {
       content.innerHTML = `<div class="loading">No rooms found. Configure Hue Bridge first.</div>`;
+
       return;
     }
 
@@ -2099,7 +2168,7 @@ async function loadRooms() {
       $('#sensors-content').innerHTML = renderSensorPanels(sensorsRoom.lights);
     }
 
-    let html = regularRooms.map(room => {
+    const html = regularRooms.map(room => {
       const showNanoleaf = nanoleafConfig?.roomId?.toLowerCase() === room.name.toLowerCase();
       const roomIcon = getRoomIcon(room.class);
       const panelKey = `room:${room.id}`;
@@ -2124,6 +2193,7 @@ async function loadRooms() {
                 const color = getLightColor(light.state);
                 const icon = getDeviceIcon(light.category, light.archetype);
                 const stateText = getStateText(light);
+
                 return `
                   <div class="light-item ${isSelected ? 'selected' : ''} ${isOffline ? 'offline' : ''}"
                        data-id="${light.id}"
@@ -2165,6 +2235,7 @@ function updateRooms(rooms) {
   allLights = rooms.flatMap(r => r.lights);
 
   const sensorsRoom = rooms.find(r => r.id === 'sensors');
+
   if (sensorsRoom) {
     $('#sensors-content').innerHTML = renderSensorPanels(sensorsRoom.lights);
   }
@@ -2172,6 +2243,7 @@ function updateRooms(rooms) {
   rooms.filter(r => r.id !== 'sensors').forEach(room => {
     room.lights.forEach(light => {
       const el = $(`.light-item[data-id="${light.id}"]`);
+
       if (!el) {
         return;
       }
@@ -2183,15 +2255,20 @@ function updateRooms(rooms) {
 
       el.classList.toggle('offline', isOffline);
       const indicator = el.querySelector('.light-indicator');
+
       if (indicator) {
         indicator.classList.toggle('on', isOn);
         indicator.style.backgroundColor = color;
       }
+
       const icon = el.querySelector('.device-icon');
+
       if (icon) {
         icon.classList.toggle('on', isOn);
       }
+
       const stateEl = el.querySelector('.light-state');
+
       if (stateEl) {
         stateEl.textContent = stateText;
       }
@@ -2206,12 +2283,15 @@ function getStateText(light) {
     if (light.state.temperature !== undefined) {
       return `${light.state.temperature.toFixed(1)}C`;
     }
+
     if (light.state.presence !== undefined) {
       return light.state.presence ? 'MOTION' : 'CLEAR';
     }
+
     if (light.state.lightlevel !== undefined) {
       return `${light.state.lightlevel} lux`;
     }
+
     return '--';
   }
 
@@ -2237,15 +2317,18 @@ function getLightColor(state) {
 
   if (state.colormode === 'ct') {
     const kelvin = Math.round(1000000 / state.ct);
+
     if (kelvin < 4000) {
       return '#ffcc88';
     }
+
     return '#fff5e6';
   }
 
   if (state.hue !== undefined && state.sat !== undefined) {
     const h = (state.hue / 65535) * 360;
     const s = (state.sat / 254) * 100;
+
     return `hsl(${h}, ${s}%, 50%)`;
   }
 
@@ -2274,9 +2357,11 @@ function populateLightSelect() {
       const option = document.createElement('option');
       option.value = light.id;
       option.textContent = light.name;
+
       if (String(light.id) === String(selectedLightId)) {
         option.selected = true;
       }
+
       optgroup.appendChild(option);
     });
 
@@ -2291,6 +2376,7 @@ function populateLightSelect() {
 async function selectLight(el) {
   if (configLocked) {
     log('Config is locked', 'error');
+
     return;
   }
 
@@ -2300,6 +2386,7 @@ async function selectLight(el) {
 
   if (!SYNCABLE_CATEGORIES.includes(category)) {
     log(`Cannot sync with ${category} device`, 'error');
+
     return;
   }
 
@@ -2316,11 +2403,13 @@ async function selectLight(el) {
 async function onSourceSelectChange(e) {
   const select = e.target;
   const id = parseInt(select.value, 10);
+
   if (!id) {
     return;
   }
 
   const light = allLights.find(l => l.id === id);
+
   if (!light) {
     return;
   }
@@ -2330,6 +2419,7 @@ async function onSourceSelectChange(e) {
 
   if (!confirmed) {
     select.value = previousId || '';
+
     return;
   }
 
@@ -2349,8 +2439,10 @@ async function loadSyncConfig() {
     configLocked = syncConfig.allowChange === false;
 
     const select = $('#sync-source-select');
+
     if (select) {
       select.disabled = configLocked;
+
       if (syncConfig.hueDeviceId) {
         selectedLightId = syncConfig.hueDeviceId;
         select.value = syncConfig.hueDeviceId;
@@ -2358,6 +2450,7 @@ async function loadSyncConfig() {
     }
 
     const nanoleafConfig = await API.nanoleaf.config();
+
     if (nanoleafConfig.configured) {
       $('#min-brightness').value = nanoleafConfig.minBrightness;
       $('#max-brightness').value = nanoleafConfig.maxBrightness;
@@ -2397,6 +2490,7 @@ async function discoverHue() {
         <p>No Hue bridges were found on your network.</p>
         <p style="margin-top: 12px">Make sure your bridge is powered on and connected to the same network.</p>
       `, '<button class="btn" onclick="hideModal()">CLOSE</button>');
+
       return;
     }
 
@@ -2470,6 +2564,7 @@ async function discoverNanoleaf() {
         <p>No Nanoleaf devices were found on your network.</p>
         <p style="margin-top: 12px">Make sure your device is powered on and connected to the same network.</p>
       `, '<button class="btn" onclick="hideModal()">CLOSE</button>');
+
       return;
     }
 
@@ -2554,10 +2649,12 @@ async function init() {
 
   $('#btn-sync-toggle').addEventListener('click', async () => {
     const isRunning = $('#sync-status').textContent === 'RUNNING';
+
     if (isRunning) {
       await API.sync.stop();
     } else {
       const result = await API.sync.start();
+
       if (!result.success) {
         log(`Failed to start: ${result.error}`, 'error');
       }

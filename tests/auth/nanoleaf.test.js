@@ -1,8 +1,23 @@
 jest.mock('axios');
 const axios = require('axios');
-const { authenticate } = require('../../src/auth/nanoleaf');
+
+const NANOLEAF_URL = 'http://192.168.1.100:16021/api/v1/new';
+
+function mockTwoRejectionsThenSuccess() {
+  const { post } = axios;
+
+  post.mockRejectedValueOnce({ response: { status: 403 } });
+  post.mockRejectedValueOnce({ response: { status: 403 } });
+  post.mockResolvedValueOnce({ data: { auth_token: 'success-token' } });
+}
 
 describe('nanoleaf auth', () => {
+  let authenticate;
+
+  beforeAll(async () => {
+    ({ authenticate } = await import('../../src/auth/nanoleaf'));
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -19,11 +34,14 @@ describe('nanoleaf auth', () => {
         success: true,
         authToken: 'test-token-123'
       });
-      expect(axios.post).toHaveBeenCalledWith(
-        'http://192.168.1.100:16021/api/v1/new',
-        {},
-        { timeout: 5000 }
-      );
+    });
+
+    it('posts to the new-token endpoint with a 5000ms timeout', async () => {
+      axios.post.mockResolvedValue({ data: { auth_token: 'test-token-123' } });
+
+      await authenticate('192.168.1.100', 16021, 1);
+
+      expect(axios.post).toHaveBeenCalledWith(NANOLEAF_URL, {}, { timeout: 5000 });
     });
 
     it('returns error when auth_token missing from response', async () => {
@@ -78,10 +96,7 @@ describe('nanoleaf auth', () => {
     });
 
     it('retries on 403 until max retries', async () => {
-      axios.post
-        .mockRejectedValueOnce({ response: { status: 403 } })
-        .mockRejectedValueOnce({ response: { status: 403 } })
-        .mockResolvedValueOnce({ data: { auth_token: 'success-token' } });
+      mockTwoRejectionsThenSuccess();
 
       const result = await authenticate('192.168.1.100', 16021, 3);
 
@@ -89,6 +104,13 @@ describe('nanoleaf auth', () => {
         success: true,
         authToken: 'success-token'
       });
+    });
+
+    it('calls post 3 times when 403 twice then success', async () => {
+      mockTwoRejectionsThenSuccess();
+
+      await authenticate('192.168.1.100', 16021, 3);
+
       expect(axios.post).toHaveBeenCalledTimes(3);
     });
   });

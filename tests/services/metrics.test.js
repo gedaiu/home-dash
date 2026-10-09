@@ -1,4 +1,8 @@
-const { formatMetrics } = require('../../src/services/metrics');
+let formatMetrics;
+
+beforeAll(async () => {
+  ({ formatMetrics } = await import('../../src/services/metrics.js'));
+});
 
 const emptySnapshot = {
   version: '2.0.0',
@@ -19,10 +23,15 @@ function samplesOf(text, metric) {
 }
 
 describe('formatMetrics', () => {
-  it('reports version 2.0.0 and 42 seconds of uptime for an unconfigured dashboard', () => {
+  it('reports version 2.0.0 for an unconfigured dashboard', () => {
     const text = formatMetrics(emptySnapshot);
 
     expect(samplesOf(text, 'home_dash_info')).toEqual(['home_dash_info{version="2.0.0"} 1']);
+  });
+
+  it('reports 42 seconds of uptime for an unconfigured dashboard', () => {
+    const text = formatMetrics(emptySnapshot);
+
     expect(samplesOf(text, 'home_dash_uptime_seconds')).toEqual(['home_dash_uptime_seconds 42']);
   });
 
@@ -82,22 +91,37 @@ describe('formatMetrics', () => {
     });
 
     expect(samplesOf(text, 'home_airpurifier_pm25')).toEqual([]);
+  });
+
+  it('reports the iaql sample of an air purifier that has not reported pm25 yet', () => {
+    const text = formatMetrics({
+      ...emptySnapshot,
+      airPurifiers: [{ name: 'Bedroom', connected: true, power: true, pm25: null, iaql: 3, tvoc: null }]
+    });
+
     expect(samplesOf(text, 'home_airpurifier_iaql')).toEqual(['home_airpurifier_iaql{name="Bedroom"} 3']);
   });
 
+  const dishwasherSnapshot = {
+    ...emptySnapshot,
+    appliances: [{
+      name: 'Dishwasher', type: 'Dishwasher', connected: true, operationState: 'run',
+      remainingSeconds: 3600, warnings: ['salt_empty', 'rinse_aid_low']
+    }]
+  };
+
   it('reports one sample per warning of a dishwasher with empty salt and low rinse aid', () => {
-    const text = formatMetrics({
-      ...emptySnapshot,
-      appliances: [{
-        name: 'Dishwasher', type: 'Dishwasher', connected: true, operationState: 'run',
-        remainingSeconds: 3600, warnings: ['salt_empty', 'rinse_aid_low']
-      }]
-    });
+    const text = formatMetrics(dishwasherSnapshot);
 
     expect(samplesOf(text, 'home_appliance_warning')).toEqual([
       'home_appliance_warning{name="Dishwasher",warning="salt_empty"} 1',
       'home_appliance_warning{name="Dishwasher",warning="rinse_aid_low"} 1'
     ]);
+  });
+
+  it('reports 3600 remaining seconds of a running dishwasher', () => {
+    const text = formatMetrics(dishwasherSnapshot);
+
     expect(samplesOf(text, 'home_appliance_remaining_seconds')).toEqual([
       'home_appliance_remaining_seconds{name="Dishwasher"} 3600'
     ]);

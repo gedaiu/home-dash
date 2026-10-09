@@ -1,9 +1,9 @@
 const express = require('express');
 const hueService = require('../services/hue');
 
+const { HTTP_BAD_REQUEST, HTTP_NOT_FOUND } = require('../lib/http-status');
+const asyncHandler = require('../lib/async-handler');
 const router = express.Router();
-
-const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 router.get('/discover', asyncHandler(async (req, res) => {
   const bridges = await hueService.discover();
@@ -12,18 +12,22 @@ router.get('/discover', asyncHandler(async (req, res) => {
 
 router.get('/bridge', asyncHandler(async (req, res) => {
   const bridge = await hueService.getBridge();
+
   if (!bridge) {
     return res.json({ configured: false });
   }
+
   res.json({ configured: true, ...bridge });
 }));
 
 router.post('/bridge/pair', asyncHandler(async (req, res) => {
-  const { ip } = req.body;
-  if (!ip) {
-    return res.status(400).json({ error: 'IP address required' });
+  const { ip: address } = req.body;
+
+  if (!address) {
+    return res.status(HTTP_BAD_REQUEST).json({ error: 'IP address required' });
   }
-  const result = await hueService.pair(ip);
+
+  const result = await hueService.pair(address);
   res.json(result);
 }));
 
@@ -44,9 +48,11 @@ router.get('/rooms', asyncHandler(async (req, res) => {
 
 router.get('/lights/:id', asyncHandler(async (req, res) => {
   const light = await hueService.getLight(parseInt(req.params.id, 10));
+
   if (!light) {
-    return res.status(404).json({ error: 'Light not found' });
+    return res.status(HTTP_NOT_FOUND).json({ error: 'Light not found' });
   }
+
   res.json(light);
 }));
 

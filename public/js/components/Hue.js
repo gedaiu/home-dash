@@ -5,41 +5,21 @@ import { hueState, addLog } from '../state.js';
 import { Panel, StatusBadge } from './Panel.js';
 import { API } from '../api.js';
 
-export function Hue() {
+function hue() {
   const [bridge, setBridge] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    API.hue.bridge().then(data => {
-      hueState.value = data;
-      setBridge(data);
-      setLoading(false);
-    }).catch(err => {
-      console.error('Failed to load Hue bridge:', err);
-      setLoading(false);
-    });
+    loadBridge(setBridge, setLoading);
 
     const dispose = effect(() => {
       if (hueState.value) {
         setBridge(hueState.value);
       }
     });
+
     return dispose;
   }, []);
-
-  const discoverHue = async () => {
-    addLog('Discovering Hue bridges...', 'info');
-    try {
-      const bridges = await API.hue.discover();
-      if (bridges.length === 0) {
-        addLog('No Hue bridges found', 'warning');
-      } else {
-        addLog(`Found ${bridges.length} bridge(s)`, 'success');
-      }
-    } catch (err) {
-      addLog(`Discovery failed: ${err.message}`, 'error');
-    }
-  };
 
   const controls = html`
     <button class="btn-icon" onClick=${discoverHue} title="Discover">
@@ -47,48 +27,91 @@ export function Hue() {
     </button>
   `;
 
+  return renderHuePanel(controls, renderBridgeContent(bridge, loading));
+}
+
+async function loadBridge(setBridge, setLoading) {
+  const hueApi = API.hue;
+
+  try {
+    const bridgeInfo = await hueApi.bridge();
+    hueState.value = bridgeInfo;
+    setBridge(bridgeInfo);
+  } catch (err) {
+    console.error('Failed to load Hue bridge:', err);
+  }
+
+  setLoading(false);
+}
+
+async function discoverHue() {
+  const hueApi = API.hue;
+  addLog('Discovering Hue bridges...', 'info');
+
+  try {
+    const bridges = await hueApi.discover();
+
+    if (bridges.length === 0) {
+      addLog('No Hue bridges found', 'warning');
+
+      return;
+    }
+
+    addLog(`Found ${bridges.length} bridge(s)`, 'success');
+  } catch (err) {
+    addLog(`Discovery failed: ${err.message}`, 'error');
+  }
+}
+
+function renderHuePanel(controls, content) {
+  return html`
+    <${Panel} panelKey="hue" defaultName="HUE BRIDGE" icon="lightbulb" controls=${controls}>
+      ${content}
+    <//>
+  `;
+}
+
+function renderBridgeContent(bridge, loading) {
   if (loading) {
-    return html`
-      <${Panel} panelKey="hue" defaultName="HUE BRIDGE" icon="lightbulb" controls=${controls}>
-        <div class="loading">Connecting...</div>
-      <//>
-    `;
+    return html`<div class="loading">Connecting...</div>`;
   }
 
   if (!bridge || !bridge.configured) {
     return html`
-      <${Panel} panelKey="hue" defaultName="HUE BRIDGE" icon="lightbulb" controls=${controls}>
-        <div class="device-info">
-          <div class="info-row">
-            <span class="label">STATUS:</span>
-            <${StatusBadge} status="NOT CONFIGURED" className="offline" />
-          </div>
-          <p style="margin-top: 12px; color: var(--text-dim)">
-            Click search to discover bridges
-          </p>
-        </div>
-      <//>
-    `;
-  }
-
-  return html`
-    <${Panel} panelKey="hue" defaultName="HUE BRIDGE" icon="lightbulb" controls=${controls}>
       <div class="device-info">
         <div class="info-row">
           <span class="label">STATUS:</span>
-          <${StatusBadge} status="CONNECTED" className="online" />
+          <${StatusBadge} status="NOT CONFIGURED" className="offline" />
         </div>
-        <div class="info-row">
-          <span class="label">IP:</span>
-          <span class="value">${bridge.ip}</span>
-        </div>
-        ${bridge.name ? html`
-          <div class="info-row">
-            <span class="label">NAME:</span>
-            <span class="value">${bridge.name}</span>
-          </div>
-        ` : null}
+        <p style="margin-top: 12px; color: var(--text-dim)">
+          Click search to discover bridges
+        </p>
       </div>
-    <//>
+    `;
+  }
+
+  return renderConnectedBridge(bridge);
+}
+
+function renderConnectedBridge(bridge) {
+  return html`
+    <div class="device-info">
+      <div class="info-row">
+        <span class="label">STATUS:</span>
+        <${StatusBadge} status="CONNECTED" className="online" />
+      </div>
+      <div class="info-row">
+        <span class="label">IP:</span>
+        <span class="value">${bridge.ip}</span>
+      </div>
+      ${bridge.name ? html`
+        <div class="info-row">
+          <span class="label">NAME:</span>
+          <span class="value">${bridge.name}</span>
+        </div>
+      ` : null}
+    </div>
   `;
 }
+
+export { hue as Hue };

@@ -1,9 +1,11 @@
-const {
-  getDeviceCategory,
-  getSensorCategory,
-  getSensorReadings,
-  sensorValue
-} = require('../../src/services/hue');
+let getDeviceCategory;
+let getSensorCategory;
+let getSensorReadings;
+let sensorValue;
+
+beforeAll(async () => {
+  ({ getDeviceCategory, getSensorCategory, getSensorReadings, sensorValue } = await import('../../src/services/hue'));
+});
 
 describe('getDeviceCategory', () => {
   it('returns motion for motion sensor', () => {

@@ -1,105 +1,79 @@
+const REQUEST_TIMEOUT_MS = 15000;
+
 export const API = {
   hue: {
-    discover: () => fetch('/api/hue/discover').then(r => r.json()),
-    bridge: () => fetch('/api/hue/bridge').then(r => r.json()),
-    pair: (ip) => fetch('/api/hue/bridge/pair', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip })
-    }).then(r => r.json()),
-    remove: () => fetch('/api/hue/bridge', { method: 'DELETE' }).then(r => r.json()),
-    rooms: () => fetch('/api/hue/rooms').then(r => r.json()),
-    lights: () => fetch('/api/hue/lights').then(r => r.json())
+    discover: () => request('/api/hue/discover'),
+    bridge: () => request('/api/hue/bridge'),
+    pair: (ipAddress) => request('/api/hue/bridge/pair', jsonOptions('POST', { 'ip': ipAddress })),
+    remove: () => request('/api/hue/bridge', { method: 'DELETE' }),
+    rooms: () => request('/api/hue/rooms'),
+    lights: () => request('/api/hue/lights')
   },
 
   nanoleaf: {
-    discover: () => fetch('/api/nanoleaf/discover').then(r => r.json()),
-    device: () => fetch('/api/nanoleaf/device').then(r => r.json()),
-    pair: (ip, port) => fetch('/api/nanoleaf/device/pair', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip, port })
-    }).then(r => r.json()),
-    remove: () => fetch('/api/nanoleaf/device', { method: 'DELETE' }).then(r => r.json()),
-    config: () => fetch('/api/nanoleaf/config').then(r => r.json()),
-    updateConfig: (config) => fetch('/api/nanoleaf/config', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config)
-    }).then(r => r.json())
+    discover: () => request('/api/nanoleaf/discover'),
+    device: () => request('/api/nanoleaf/device'),
+    pair: (ipAddress, port) => request('/api/nanoleaf/device/pair', jsonOptions('POST', { 'ip': ipAddress, port })),
+    remove: () => request('/api/nanoleaf/device', { method: 'DELETE' }),
+    config: () => request('/api/nanoleaf/config'),
+    updateConfig: (config) => request('/api/nanoleaf/config', jsonOptions('PUT', config))
   },
 
   sync: {
-    config: () => fetch('/api/sync/config').then(r => r.json()),
-    setConfig: (config) => fetch('/api/sync/config', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config)
-    }).then(r => r.json()),
-    start: () => fetch('/api/sync/start', { method: 'POST' }).then(r => r.json()),
-    stop: () => fetch('/api/sync/stop', { method: 'POST' }).then(r => r.json()),
-    status: () => fetch('/api/sync/status').then(r => r.json())
+    config: () => request('/api/sync/config'),
+    setConfig: (config) => request('/api/sync/config', jsonOptions('PUT', config)),
+    start: () => request('/api/sync/start', { method: 'POST' }),
+    stop: () => request('/api/sync/stop', { method: 'POST' }),
+    status: () => request('/api/sync/status')
   },
 
   homeconnect: {
-    status: () => fetch('/api/homeconnect/status').then(r => r.json()),
-    devices: () => fetch('/api/homeconnect/devices').then(r => r.json()),
-    refresh: () => fetch('/api/homeconnect/refresh', { method: 'POST' }).then(r => r.json()),
-    authUrl: () => fetch('/api/homeconnect/auth/url').then(r => r.json()),
-    configure: (clientId, clientSecret) => fetch('/api/homeconnect/configure', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clientId, clientSecret })
-    }).then(r => r.json()),
-    disconnect: () => fetch('/api/homeconnect/disconnect', { method: 'DELETE' }).then(r => r.json())
+    status: () => request('/api/homeconnect/status'),
+    devices: () => request('/api/homeconnect/devices'),
+    refresh: () => request('/api/homeconnect/refresh', { method: 'POST' }),
+    authUrl: () => request('/api/homeconnect/auth/url'),
+    configure: (clientId, clientSecret) => request('/api/homeconnect/configure', jsonOptions('POST', { clientId, clientSecret })),
+    disconnect: () => request('/api/homeconnect/disconnect', { method: 'DELETE' })
   },
 
   roomba: {
-    status: () => fetch('/api/roomba/status').then(r => r.json()),
-    start: () => fetch('/api/roomba/start', { method: 'POST' }).then(r => r.json()),
-    stop: () => fetch('/api/roomba/stop', { method: 'POST' }).then(r => r.json()),
-    pause: () => fetch('/api/roomba/pause', { method: 'POST' }).then(r => r.json()),
-    resume: () => fetch('/api/roomba/resume', { method: 'POST' }).then(r => r.json()),
-    dock: () => fetch('/api/roomba/dock', { method: 'POST' }).then(r => r.json())
+    status: () => request('/api/roomba/status'),
+    start: () => request('/api/roomba/start', { method: 'POST' }),
+    stop: () => request('/api/roomba/stop', { method: 'POST' }),
+    pause: () => request('/api/roomba/pause', { method: 'POST' }),
+    resume: () => request('/api/roomba/resume', { method: 'POST' }),
+    dock: () => request('/api/roomba/dock', { method: 'POST' })
   },
 
   airpurifier: {
-    devices: () => fetch('/api/airpurifier/devices').then(r => r.json()),
-    status: (index) => fetch(`/api/airpurifier/devices/${index}/status`).then(r => r.json()),
-    add: (ip, name) => fetch('/api/airpurifier/devices', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip, name })
-    }).then(r => r.json()),
-    remove: (index) => fetch(`/api/airpurifier/devices/${index}`, { method: 'DELETE' }).then(r => r.json()),
-    connect: (index) => fetch(`/api/airpurifier/devices/${index}/connect`, { method: 'POST' }).then(r => r.json()),
-    disconnect: (index) => fetch(`/api/airpurifier/devices/${index}/disconnect`, { method: 'POST' }).then(r => r.json()),
-    power: (index, on) => fetch(`/api/airpurifier/devices/${index}/power`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ on })
-    }).then(r => r.json()),
-    mode: (index, mode) => fetch(`/api/airpurifier/devices/${index}/mode`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode })
-    }).then(r => r.json()),
-    fan: (index, speed) => fetch(`/api/airpurifier/devices/${index}/fan`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ speed })
-    }).then(r => r.json())
+    devices: () => request('/api/airpurifier/devices'),
+    status: (index) => request(`/api/airpurifier/devices/${index}/status`),
+    add: (ipAddress, name) => request('/api/airpurifier/devices', jsonOptions('POST', { 'ip': ipAddress, name })),
+    remove: (index) => request(`/api/airpurifier/devices/${index}`, { method: 'DELETE' }),
+    connect: (index) => request(`/api/airpurifier/devices/${index}/connect`, { method: 'POST' }),
+    disconnect: (index) => request(`/api/airpurifier/devices/${index}/disconnect`, { method: 'POST' }),
+    power: (index, isOn) => request(`/api/airpurifier/devices/${index}/power`, jsonOptions('POST', { 'on': isOn })),
+    mode: (index, mode) => request(`/api/airpurifier/devices/${index}/mode`, jsonOptions('POST', { mode })),
+    fan: (index, speed) => request(`/api/airpurifier/devices/${index}/fan`, jsonOptions('POST', { speed }))
   },
 
   panels: {
-    getNames: () => fetch('/api/panels/names').then(r => r.json()),
-    setName: (key, name) => fetch(`/api/panels/names/${encodeURIComponent(key)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
-    }).then(r => r.json()),
-    deleteName: (key) => fetch(`/api/panels/names/${encodeURIComponent(key)}`, {
-      method: 'DELETE'
-    }).then(r => r.json())
+    getNames: () => request('/api/panels/names'),
+    setName: (key, name) => request(`/api/panels/names/${encodeURIComponent(key)}`, jsonOptions('PUT', { name })),
+    deleteName: (key) => request(`/api/panels/names/${encodeURIComponent(key)}`, { method: 'DELETE' })
   }
 };
+
+async function request(url, options = {}) {
+  const response = await fetch(url, { ...options, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+
+  return response.json();
+}
+
+function jsonOptions(method, payload) {
+  return {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  };
+}

@@ -1,19 +1,16 @@
+const DEFAULT_TIMEOUT_MS = 5000;
+
 const dorita980 = require('dorita980');
 
-async function discoverDevice(timeout = 5000) {
+async function discoverDevice(timeout = DEFAULT_TIMEOUT_MS) {
   return new Promise((resolve) => {
     const timeoutId = setTimeout(() => {
       resolve(null);
     }, timeout);
 
-    dorita980.getRobotIP((err, ip) => {
+    dorita980.getRobotIP((err, address) => {
       clearTimeout(timeoutId);
-
-      if (err) {
-        resolve(null);
-      } else {
-        resolve(ip);
-      }
+      resolve(err ? null : address);
     });
   });
 }

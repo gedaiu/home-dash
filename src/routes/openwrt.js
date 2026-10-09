@@ -1,12 +1,9 @@
 const express = require('express');
+const { HTTP_NOT_FOUND } = require('../lib/http-status');
+const asyncHandler = require('../lib/async-handler');
 const router = express.Router();
 const openwrtService = require('../services/openwrt');
 const geoip = require('../lib/geoip');
-
-// Helper for async route handlers
-const asyncHandler = (fn) => (req, res, next) => {
-  Promise.resolve(fn(req, res, next)).catch(next);
-};
 
 // Get all router statuses
 router.get('/status', asyncHandler(async (req, res) => {
@@ -29,10 +26,11 @@ router.get('/devices', asyncHandler(async (req, res) => {
 // Get device by MAC
 router.get('/devices/:mac', asyncHandler(async (req, res) => {
   const devices = openwrtService.getDevices();
-  const device = devices.find(d => d.mac.toLowerCase() === req.params.mac.toLowerCase());
+  const { mac } = req.params;
+  const device = devices.find(candidate => candidate.mac.toLowerCase() === mac.toLowerCase());
 
   if (!device) {
-    return res.status(404).json({
+    return res.status(HTTP_NOT_FOUND).json({
       success: false,
       error: 'Device not found'
     });
@@ -55,9 +53,10 @@ router.get('/connections', asyncHandler(async (req, res) => {
 
 // Get connections for a specific device
 router.get('/connections/:mac', asyncHandler(async (req, res) => {
+  const { mac } = req.params;
   const connections = openwrtService.getConnections();
   const deviceConnections = connections.filter(
-    c => c.srcMac?.toLowerCase() === req.params.mac.toLowerCase()
+    connection => connection.srcMac?.toLowerCase() === mac.toLowerCase()
   );
 
   res.json({
@@ -77,10 +76,10 @@ router.get('/graph', asyncHandler(async (req, res) => {
 
 // Get IP information
 router.get('/ip/:ip', asyncHandler(async (req, res) => {
-  const info = await geoip.lookup(req.params.ip);
+  const ipInfo = await geoip.lookup(req.params.ip);
 
-  if (!info) {
-    return res.status(404).json({
+  if (!ipInfo) {
+    return res.status(HTTP_NOT_FOUND).json({
       success: false,
       error: 'IP information not found'
     });
@@ -88,7 +87,7 @@ router.get('/ip/:ip', asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    data: info
+    data: ipInfo
   });
 }));
 

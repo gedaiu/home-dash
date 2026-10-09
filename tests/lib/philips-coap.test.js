@@ -1,256 +1,181 @@
-const {
-  SECRET_KEY,
-  deriveKeyIv,
-  decrypt,
-  encrypt,
-  incrementCounter,
-  buildCommand,
-  parseStatus
-} = require('../../src/lib/philips-coap');
+let philips;
+
+beforeAll(async () => {
+  philips = await import('../../src/lib/philips-coap');
+});
+
+function reportedStatus(reported) {
+  return philips.parseStatus({ state: { reported } });
+}
+
+function desiredCommand(fields) {
+  return {
+    state: {
+      desired: { CommandType: 'app', DeviceId: '', EnduserId: '', ...fields }
+    }
+  };
+}
 
 describe('philips-coap', () => {
   describe('SECRET_KEY', () => {
     it('equals JiangPan', () => {
-      expect(SECRET_KEY).toBe('JiangPan');
+      expect(philips.SECRET_KEY).toBe('JiangPan');
     });
   });
 
   describe('deriveKeyIv', () => {
-    it('returns key and iv buffers of 16 bytes each', () => {
-      const { key, iv } = deriveKeyIv('12345678');
-      expect(key).toBeInstanceOf(Buffer);
-      expect(iv).toBeInstanceOf(Buffer);
-      expect(key.length).toBe(16);
-      expect(iv.length).toBe(16);
+    it('returns a 16 byte key buffer for salt 12345678', () => {
+      const { key } = philips.deriveKeyIv('12345678');
+
+      expect([key instanceof Buffer, key.length]).toEqual([true, 16]);
     });
 
-    it('returns different results for different salts', () => {
-      const result1 = deriveKeyIv('AAAAAAAA');
-      const result2 = deriveKeyIv('BBBBBBBB');
-      expect(result1.key.equals(result2.key)).toBe(false);
-      expect(result1.iv.equals(result2.iv)).toBe(false);
+    it('returns a 16 byte iv buffer for salt 12345678', () => {
+      const { iv: initVector } = philips.deriveKeyIv('12345678');
+
+      expect([initVector instanceof Buffer, initVector.length]).toEqual([true, 16]);
     });
 
-    it('returns consistent results for same salt', () => {
-      const result1 = deriveKeyIv('DEADBEEF');
-      const result2 = deriveKeyIv('DEADBEEF');
-      expect(result1.key.equals(result2.key)).toBe(true);
-      expect(result1.iv.equals(result2.iv)).toBe(true);
+    it('returns different keys for salts AAAAAAAA and BBBBBBBB', () => {
+      const first = philips.deriveKeyIv('AAAAAAAA');
+      const second = philips.deriveKeyIv('BBBBBBBB');
+
+      expect(first.key.equals(second.key)).toBe(false);
+    });
+
+    it('returns different ivs for salts AAAAAAAA and BBBBBBBB', () => {
+      const first = philips.deriveKeyIv('AAAAAAAA');
+      const second = philips.deriveKeyIv('BBBBBBBB');
+
+      expect(first.iv.equals(second.iv)).toBe(false);
+    });
+
+    it('returns equal keys for salt DEADBEEF twice', () => {
+      const first = philips.deriveKeyIv('DEADBEEF');
+      const second = philips.deriveKeyIv('DEADBEEF');
+
+      expect(first.key.equals(second.key)).toBe(true);
+    });
+
+    it('returns equal ivs for salt DEADBEEF twice', () => {
+      const first = philips.deriveKeyIv('DEADBEEF');
+      const second = philips.deriveKeyIv('DEADBEEF');
+
+      expect(first.iv.equals(second.iv)).toBe(true);
     });
   });
 
   describe('incrementCounter', () => {
-    it('increments 00000000 to 00000001', () => {
-      expect(incrementCounter('00000000')).toBe('00000001');
-    });
-
-    it('increments 00000001 to 00000002', () => {
-      expect(incrementCounter('00000001')).toBe('00000002');
-    });
-
-    it('increments 000000FF to 00000100', () => {
-      expect(incrementCounter('000000FF')).toBe('00000100');
-    });
-
-    it('increments 0000FFFF to 00010000', () => {
-      expect(incrementCounter('0000FFFF')).toBe('00010000');
-    });
-
-    it('handles lowercase input and returns uppercase', () => {
-      expect(incrementCounter('0000000a')).toBe('0000000B');
-    });
-
-    it('wraps around at FFFFFFFF to 00000000', () => {
-      expect(incrementCounter('FFFFFFFF')).toBe('00000000');
+    it.each([
+      ['00000000', '00000001'],
+      ['00000001', '00000002'],
+      ['000000FF', '00000100'],
+      ['0000FFFF', '00010000'],
+      ['0000000a', '0000000B'],
+      ['FFFFFFFF', '00000000']
+    ])('increments %s to %s', (counter, expected) => {
+      expect(philips.incrementCounter(counter)).toBe(expected);
     });
   });
 
   describe('buildCommand', () => {
-    it('builds power on command', () => {
-      const cmd = buildCommand('pwr', '1');
-      expect(cmd).toEqual({
-        state: {
-          desired: {
-            CommandType: 'app',
-            DeviceId: '',
-            EnduserId: '',
-            pwr: '1'
-          }
-        }
-      });
+    it('builds the power on command for pwr 1', () => {
+      expect(philips.buildCommand('pwr', '1')).toEqual(desiredCommand({ pwr: '1' }));
     });
 
-    it('builds mode command', () => {
-      const cmd = buildCommand('mode', 'AG');
-      expect(cmd.state.desired.mode).toBe('AG');
+    it('builds the mode command for mode AG', () => {
+      expect(philips.buildCommand('mode', 'AG')).toEqual(desiredCommand({ mode: 'AG' }));
     });
 
-    it('builds fan speed command', () => {
-      const cmd = buildCommand('om', '2');
-      expect(cmd.state.desired.om).toBe('2');
+    it('builds the fan speed command for om 2', () => {
+      expect(philips.buildCommand('om', '2')).toEqual(desiredCommand({ 'om': '2' }));
     });
 
-    it('builds child lock command', () => {
-      const cmd = buildCommand('cl', true);
-      expect(cmd.state.desired.cl).toBe(true);
+    it('builds the child lock command for cl true', () => {
+      const locked = true;
+
+      expect(philips.buildCommand('cl', locked)).toEqual(desiredCommand({ 'cl': true }));
     });
   });
 
   describe('encrypt and decrypt', () => {
-    it('round-trips simple JSON data', () => {
+    it('round-trips the pwr 1 desired state with counter DEADBEEF', () => {
       const original = { state: { desired: { pwr: '1' } } };
-      const counter = 'DEADBEEF';
-      const encrypted = encrypt(original, counter);
-      const decrypted = decrypt(encrypted);
-      expect(decrypted).toEqual(original);
+
+      expect(philips.decrypt(philips.encrypt(original, 'DEADBEEF'))).toEqual(original);
     });
 
-    it('encrypted payload has correct format', () => {
-      const data = { test: 'value' };
-      const counter = '12345678';
-      const encrypted = encrypt(data, counter);
-
-      expect(encrypted.slice(0, 8)).toBe('12345678');
-      expect(encrypted.length).toBeGreaterThan(72);
-      expect(encrypted.slice(-64)).toMatch(/^[0-9A-F]{64}$/);
+    it('starts the encrypted payload for counter 12345678 with that counter', () => {
+      expect(philips.encrypt({ test: 'value' }, '12345678').slice(0, 8)).toBe('12345678');
     });
 
-    it('round-trips command with various fields', () => {
-      const cmd = buildCommand('mode', 'AG');
-      const counter = 'ABCD1234';
-      const encrypted = encrypt(cmd, counter);
-      const decrypted = decrypt(encrypted);
-      expect(decrypted).toEqual(cmd);
+    it('ends the encrypted payload with a 64 character uppercase hex digest', () => {
+      expect(philips.encrypt({ test: 'value' }, '12345678').slice(-64)).toMatch(/^[0-9A-F]{64}$/);
+    });
+
+    it('produces an encrypted payload longer than 72 characters', () => {
+      expect(philips.encrypt({ test: 'value' }, '12345678').length).toBeGreaterThan(72);
+    });
+
+    it('round-trips the mode AG command with counter ABCD1234', () => {
+      const command = philips.buildCommand('mode', 'AG');
+
+      expect(philips.decrypt(philips.encrypt(command, 'ABCD1234'))).toEqual(command);
     });
   });
 
   describe('decrypt', () => {
-    it('returns null for null payload', () => {
-      expect(decrypt(null)).toBeNull();
+    it('returns null for a null payload', () => {
+      expect(philips.decrypt(null)).toBeNull();
     });
 
-    it('returns null for empty string', () => {
-      expect(decrypt('')).toBeNull();
+    it('returns null for an empty string', () => {
+      expect(philips.decrypt('')).toBeNull();
     });
 
-    it('returns null for payload shorter than 72 chars', () => {
-      expect(decrypt('ABCD1234' + '0'.repeat(60))).toBeNull();
+    it('returns null for a payload shorter than 72 characters', () => {
+      expect(philips.decrypt('ABCD1234' + '0'.repeat(60))).toBeNull();
+    });
+
+    it('returns null for a payload with salt and digest but no ciphertext', () => {
+      expect(philips.decrypt('ABCD1234' + '0'.repeat(64))).toBeNull();
     });
   });
 
   describe('parseStatus', () => {
-    it('parses pwr field', () => {
-      const data = { state: { reported: { pwr: '1' } } };
-      const status = parseStatus(data);
-      expect(status.pwr).toBe('1');
+    it.each([
+      ['pwr', { pwr: '1' }, { pwr: '1' }],
+      ['mode', { mode: 'AG' }, { mode: 'AG' }],
+      ['om (fan speed)', { 'om': '2' }, { 'om': '2' }],
+      ['pm25', { pm25: 15 }, { pm25: 15 }],
+      ['iaql (air quality index)', { iaql: 3 }, { iaql: 3 }],
+      ['tvoc', { tvoc: 2 }, { tvoc: 2 }],
+      ['aqil (light brightness)', { aqil: 50 }, { aqil: 50 }],
+      ['uil (button light)', { uil: '1' }, { uil: '1' }],
+      ['cl (child lock)', { 'cl': true }, { 'cl': true }],
+      ['err', { err: 5 }, { err: 5 }],
+      ['Runtime as runtime', { Runtime: 123456 }, { runtime: 123456 }],
+      ['name and modelid as model', { name: 'Living Room', modelid: 'AC2939/10' }, { name: 'Living Room', model: 'AC2939/10' }]
+    ])('parses the %s field', (label, reported, expected) => {
+      expect(reportedStatus(reported)).toMatchObject(expected);
     });
 
-    it('parses mode field', () => {
-      const data = { state: { reported: { mode: 'AG' } } };
-      const status = parseStatus(data);
-      expect(status.mode).toBe('AG');
+    it('parses the filter status fields', () => {
+      const filters = { fltsts0: 100, flttotal0: 720, fltsts1: 3000, flttotal1: 4800, fltsts2: 500, flttotal2: 2400 };
+
+      expect(reportedStatus(filters)).toMatchObject(filters);
     });
 
-    it('parses om (fan speed) field', () => {
-      const data = { state: { reported: { om: '2' } } };
-      const status = parseStatus(data);
-      expect(status.om).toBe('2');
+    it('parses a payload without the state.reported wrapper', () => {
+      expect(philips.parseStatus({ pwr: '1', mode: 'M', pm25: 10 })).toMatchObject({ pwr: '1', mode: 'M', pm25: 10 });
     });
 
-    it('parses pm25 field', () => {
-      const data = { state: { reported: { pm25: 15 } } };
-      const status = parseStatus(data);
-      expect(status.pm25).toBe(15);
+    it('returns null name, model, pm25 and tvoc for an empty report', () => {
+      expect(reportedStatus({})).toMatchObject({ name: null, model: null, pm25: null, tvoc: null });
     });
 
-    it('parses iaql (air quality index) field', () => {
-      const data = { state: { reported: { iaql: 3 } } };
-      const status = parseStatus(data);
-      expect(status.iaql).toBe(3);
-    });
-
-    it('parses tvoc field', () => {
-      const data = { state: { reported: { tvoc: 2 } } };
-      const status = parseStatus(data);
-      expect(status.tvoc).toBe(2);
-    });
-
-    it('parses aqil (light brightness) field', () => {
-      const data = { state: { reported: { aqil: 50 } } };
-      const status = parseStatus(data);
-      expect(status.aqil).toBe(50);
-    });
-
-    it('parses uil (button light) field', () => {
-      const data = { state: { reported: { uil: '1' } } };
-      const status = parseStatus(data);
-      expect(status.uil).toBe('1');
-    });
-
-    it('parses cl (child lock) field', () => {
-      const data = { state: { reported: { cl: true } } };
-      const status = parseStatus(data);
-      expect(status.cl).toBe(true);
-    });
-
-    it('parses filter status fields', () => {
-      const data = {
-        state: {
-          reported: {
-            fltsts0: 100,
-            flttotal0: 720,
-            fltsts1: 3000,
-            flttotal1: 4800,
-            fltsts2: 500,
-            flttotal2: 2400
-          }
-        }
-      };
-      const status = parseStatus(data);
-      expect(status).toMatchObject({
-        fltsts0: 100,
-        flttotal0: 720,
-        fltsts1: 3000,
-        flttotal1: 4800,
-        fltsts2: 500,
-        flttotal2: 2400
-      });
-    });
-
-    it('parses device info', () => {
-      const data = { state: { reported: { name: 'Living Room', modelid: 'AC2939/10' } } };
-      const status = parseStatus(data);
-      expect(status.name).toBe('Living Room');
-      expect(status.model).toBe('AC2939/10');
-    });
-
-    it('parses err field', () => {
-      const data = { state: { reported: { err: 5 } } };
-      const status = parseStatus(data);
-      expect(status.err).toBe(5);
-    });
-
-    it('parses runtime field', () => {
-      const data = { state: { reported: { Runtime: 123456 } } };
-      const status = parseStatus(data);
-      expect(status.runtime).toBe(123456);
-    });
-
-    it('handles data without state.reported wrapper', () => {
-      const data = { pwr: '1', mode: 'M', pm25: 10 };
-      const status = parseStatus(data);
-      expect(status.pwr).toBe('1');
-      expect(status.mode).toBe('M');
-      expect(status.pm25).toBe(10);
-    });
-
-    it('returns null for missing fields', () => {
-      const data = { state: { reported: {} } };
-      const status = parseStatus(data);
-      expect(status.name).toBeNull();
-      expect(status.model).toBeNull();
-      expect(status.pm25).toBeNull();
-      expect(status.tvoc).toBeNull();
+    it('returns the default capabilities for an empty report', () => {
+      expect(reportedStatus({}).capabilities).toEqual(philips.MODEL_CAPABILITIES['default']);
     });
   });
 });

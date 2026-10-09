@@ -8,6 +8,8 @@ export function showModal(title, content, footer = '') {
   lucide.createIcons();
 }
 
-export function hideModal() {
+function closeModal() {
   $('#discover-modal').hidden = true;
 }
+
+export { closeModal as hideModal };

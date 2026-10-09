@@ -1,13 +1,13 @@
-const { APP_NAME, DEVICE_NAME } = require('../../src/auth/hue');
+let constants;
+
+beforeAll(async () => {
+  constants = await import('../../src/auth/hue');
+});
 
 describe('hue auth', () => {
-  describe('constants', () => {
-    it('APP_NAME is hue-nanoleaf-sync', () => {
-      expect(APP_NAME).toBe('hue-nanoleaf-sync');
-    });
+  it('exposes APP_NAME and DEVICE_NAME constants', () => {
+    const { APP_NAME, DEVICE_NAME } = constants;
 
-    it('DEVICE_NAME is cli-scanner', () => {
-      expect(DEVICE_NAME).toBe('cli-scanner');
-    });
+    expect({ APP_NAME, DEVICE_NAME }).toEqual({ APP_NAME: 'hue-nanoleaf-sync', DEVICE_NAME: 'cli-scanner' });
   });
 });

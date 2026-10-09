@@ -1,6 +1,7 @@
 const express = require('express');
 const syncService = require('../services/sync');
 
+const { HTTP_BAD_REQUEST, HTTP_FORBIDDEN } = require('../lib/http-status');
 const router = express.Router();
 
 router.get('/config', (req, res) => {
@@ -13,11 +14,11 @@ router.put('/config', (req, res) => {
   const currentConfig = syncService.getConfig() || {};
 
   if (currentConfig.allowChange === false) {
-    return res.status(403).json({ error: 'Config changes are locked' });
+    return res.status(HTTP_FORBIDDEN).json({ error: 'Config changes are locked' });
   }
 
   if (!hueDeviceId) {
-    return res.status(400).json({ error: 'hueDeviceId required' });
+    return res.status(HTTP_BAD_REQUEST).json({ error: 'hueDeviceId required' });
   }
 
   syncService.setConfig({

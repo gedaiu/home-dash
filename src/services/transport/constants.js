@@ -1,0 +1,4 @@
+const MS_PER_MINUTE = 60000;
+const SECONDS_PER_MINUTE = 60;
+
+module.exports = { MS_PER_MINUTE, SECONDS_PER_MINUTE };

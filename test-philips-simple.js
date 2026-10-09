@@ -3,64 +3,95 @@
 // Simplified test - just try to get any observe updates
 
 const coap = require('node-coap-client').CoapClient;
-const crypto = require('crypto');
+const {
+  resolveDeviceIp,
+  createBaseUrl,
+  createSyncToken,
+  createObserveOptions,
+  delay
+} = require('./scripts/philips/common');
 
-const SECRET_KEY = 'JiangPan';
-const DEVICE_IP = process.argv[2] || '192.168.1.237';
-const baseUrl = `coap://${DEVICE_IP}:5683`;
+const OBSERVE_DURATION_MS = 30000;
+const PAYLOAD_PREVIEW_LENGTH = 40;
 
-console.log('Testing Philips Air Purifier at:', DEVICE_IP);
+function main() {
+  const deviceIp = resolveDeviceIp();
 
-async function test() {
-  // Reset any existing connections
+  console.log('Testing Philips Air Purifier at:', deviceIp);
+
+  runTest(createBaseUrl(deviceIp)).catch(reportFailure);
+}
+
+async function runTest(baseUrl) {
   coap.reset();
-  
-  // Step 1: Info
-  console.log('\n1. Getting device info...');
-  const info = await coap.request(`${baseUrl}/sys/dev/info`, 'get');
-  console.log('Info:', info.payload.toString());
-  
-  // Step 2: Sync
-  console.log('\n2. Syncing...');
-  const token = crypto.randomBytes(32).toString('hex').toUpperCase();
-  const sync = await coap.request(`${baseUrl}/sys/dev/sync`, 'post', 
-    Buffer.from(token, 'utf-8'));
-  const counter = sync.payload.toString('utf-8');
-  console.log('Counter:', counter);
-  
-  // Step 3: Observe with raw output
-  console.log('\n3. Starting observe (30 seconds)...');
-  console.log('Waiting for observe updates...\n');
-  
-  let updateCount = 0;
-  
-  await coap.observe(`${baseUrl}/sys/dev/status`, 'get', 
-    (response) => {
-      updateCount++;
-      console.log(`Update ${updateCount}:`);
-      console.log('  Code:', response.code?.major + '.' + response.code?.minor);
-      console.log('  Payload length:', response.payload?.length || 0);
-      if (response.payload && response.payload.length > 0) {
-        const hex = response.payload.toString('utf-8');
-        console.log('  First 40 chars:', hex.slice(0, 40));
-      }
-      console.log('');
-    }, 
-    '', 
-    { keepAlive: true, confirmable: false, retransmit: true }
-  );
-  
-  console.log('Observe registered');
-  
-  // Wait 30 seconds
-  await new Promise(r => setTimeout(r, 30000));
-  
-  console.log(`\nReceived ${updateCount} updates`);
+
+  await printDeviceInfo(baseUrl);
+  await syncWithDevice(baseUrl);
+
+  const stats = { updateCount: 0 };
+
+  await observeStatus(baseUrl, stats);
+  await delay(OBSERVE_DURATION_MS);
+
+  console.log(`\nReceived ${stats.updateCount} updates`);
   coap.stopObserving(`${baseUrl}/sys/dev/status`);
   coap.reset();
 }
 
-test().catch(err => {
+async function printDeviceInfo(baseUrl) {
+  console.log('\n1. Getting device info...');
+
+  const infoResponse = await coap.request(`${baseUrl}/sys/dev/info`, 'get');
+
+  console.log('Info:', infoResponse.payload.toString());
+}
+
+async function syncWithDevice(baseUrl) {
+  console.log('\n2. Syncing...');
+
+  const sync = await coap.request(`${baseUrl}/sys/dev/sync`, 'post', createSyncToken());
+
+  console.log('Counter:', sync.payload.toString('utf-8'));
+}
+
+async function observeStatus(baseUrl, stats) {
+  console.log('\n3. Starting observe (30 seconds)...');
+  console.log('Waiting for observe updates...\n');
+
+  await coap.observe(
+    `${baseUrl}/sys/dev/status`,
+    'get',
+    response => logUpdate(stats, response),
+    '',
+    createObserveOptions()
+  );
+
+  console.log('Observe registered');
+}
+
+function logUpdate(stats, response) {
+  stats.updateCount++;
+  console.log(`Update ${stats.updateCount}:`);
+  console.log('  Code:', `${response.code?.major}.${response.code?.minor}`);
+  console.log('  Payload length:', response.payload?.length || 0);
+
+  logPayloadPreview(response.payload);
+  console.log('');
+}
+
+function logPayloadPreview(payload) {
+  if (!payload || payload.length === 0) {
+    return;
+  }
+
+  const payloadText = payload.toString('utf-8');
+
+  console.log('  First 40 chars:', payloadText.slice(0, PAYLOAD_PREVIEW_LENGTH));
+}
+
+function reportFailure(err) {
   console.error('Error:', err);
   coap.reset();
-});
+}
+
+main();

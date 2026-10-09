@@ -1,36 +1,36 @@
 .rooms-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 16px;
+  gap: var(--space-16);
 }
 
 .room-panel .panel-content {
-  padding: 10px 14px;
+  padding: var(--space-10) var(--space-14);
 }
 
 .room-temp {
   margin-left: auto;
   color: var(--text-bright);
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 .room-panel .panel-header .btn-icon {
-  margin-left: 8px;
+  margin-left: var(--space-8);
 }
 
 .lights-list {
   display: flex;
   justify-content: space-between;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .light-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
+  gap: var(--space-10);
+  padding: var(--space-6) var(--space-8);
 }
 
 .light-indicator {
@@ -41,23 +41,23 @@
 }
 
 .light-indicator.on {
-  box-shadow: 0 0 6px currentColor;
+  box-shadow: 0 0 var(--shadow-size-6) currentColor;
 }
 
 .light-name {
   flex: 1;
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 .light-state {
-  font-size: 12px;
+  font-size: var(--text-base);
   color: var(--text-dim);
 }
 
 .light-item.offline .light-name,
 .light-item.offline .light-state,
 .light-item.offline .device-icon {
-  color: #666;
+  color: var(--color-gray);
   text-shadow: none;
 }
 

@@ -1,115 +1,38 @@
-export const $ = (sel) => document.querySelector(sel);
-export const $$ = (sel) => document.querySelectorAll(sel);
+import { CATEGORY_ICONS, ARCHETYPE_ICONS, ROOM_ICONS } from './icon-maps.js';
 
-export const CATEGORY_ICONS = {
-  motion: 'scan-eye',
-  temperature: 'thermometer',
-  lightlevel: 'sun-dim',
-  daylight: 'sun',
-  switch: 'toggle-left',
-  sensor: 'radio',
-  plug: 'plug',
-  strip: 'grip-horizontal',
-  candle: 'flame',
-  spot: 'circle-dot',
-  ceiling: 'lamp-ceiling',
-  lamp: 'lamp-desk',
-  bulb: 'lightbulb',
-  device: 'cpu',
-  pm25: 'wind'
-};
+const queryOne = (selector) => document.querySelector(selector);
+const queryAll = (selector) => document.querySelectorAll(selector);
 
-export const SYNCABLE_CATEGORIES = ['bulb', 'lamp', 'spot', 'ceiling', 'strip', 'candle'];
+export { queryOne as $, queryAll as $$ };
+export { CATEGORY_ICONS, ARCHETYPE_ICONS, ROOM_ICONS, SYNCABLE_CATEGORIES } from './icon-maps.js';
 
-export const ARCHETYPE_ICONS = {
-  'sultanbulb': 'lightbulb',
-  'classicbulb': 'lightbulb',
-  'vintagebulb': 'lightbulb',
-  'candlebulb': 'lightbulb',
-  'spotbulb': 'circle-dot',
-  'recessedceiling': 'circle-dot',
-  'recessedfloor': 'circle-dot',
-  'pendantround': 'lamp-ceiling',
-  'pendantlong': 'lamp-ceiling',
-  'ceilinghorizontal': 'lamp-ceiling',
-  'ceilingvertical': 'lamp-ceiling',
-  'ceilinground': 'lamp-ceiling',
-  'ceilingsquare': 'lamp-ceiling',
-  'flexiblelamp': 'lamp-desk',
-  'tablelamp': 'lamp-desk',
-  'tableshade': 'lamp-desk',
-  'floorlamp': 'lamp-floor',
-  'floorlantern': 'lamp-floor',
-  'floorshade': 'lamp-floor',
-  'singlespot': 'circle-dot',
-  'doublespot': 'circle-dot',
-  'walllantern': 'lamp-wall-down',
-  'wallshade': 'lamp-wall-down',
-  'wallspot': 'lamp-wall-down',
-  'plug': 'plug',
-  'lightstrip': 'grip-horizontal',
-  'huelightstrip': 'grip-horizontal',
-  'hueplay': 'tv',
-  'huego': 'battery',
-  'huebloom': 'sparkles',
-  'hueiris': 'sparkles',
-  'twilight': 'moon-star',
-  'bollard': 'cylinder',
-  'christmastree': 'tree-pine'
-};
-
-export const ROOM_ICONS = {
-  'living_room': 'sofa',
-  'kitchen': 'utensils',
-  'dining': 'utensils-crossed',
-  'bedroom': 'bed-double',
-  'kids_bedroom': 'baby',
-  'bathroom': 'bath',
-  'nursery': 'baby',
-  'recreation': 'gamepad-2',
-  'office': 'briefcase',
-  'gym': 'dumbbell',
-  'hallway': 'door-open',
-  'toilet': 'droplets',
-  'front_door': 'door-closed',
-  'garage': 'warehouse',
-  'terrace': 'trees',
-  'garden': 'flower-2',
-  'driveway': 'car',
-  'carport': 'car',
-  'home': 'home',
-  'downstairs': 'arrow-down',
-  'upstairs': 'arrow-up',
-  'top_floor': 'arrow-up-to-line',
-  'attic': 'triangle',
-  'guest_room': 'bed-single',
-  'staircase': 'stairs',
-  'lounge': 'armchair',
-  'man_cave': 'gamepad-2',
-  'computer': 'monitor',
-  'studio': 'music',
-  'music': 'music-2',
-  'tv': 'tv',
-  'reading': 'book-open',
-  'closet': 'shirt',
-  'storage': 'archive',
-  'laundry_room': 'washing-machine',
-  'balcony': 'fence',
-  'porch': 'lamp',
-  'barbecue': 'flame',
-  'pool': 'waves',
-  'other': 'layout-grid'
-};
+const MS_PER_SECOND = 1000;
+const SECONDS_PER_MINUTE = 60;
+const MINUTES_PER_HOUR = 60;
+const HOURS_PER_DAY = 24;
+const SECONDS_PER_HOUR = SECONDS_PER_MINUTE * MINUTES_PER_HOUR;
+const MS_PER_DAY = HOURS_PER_DAY * SECONDS_PER_HOUR * MS_PER_SECOND;
+const CHART_SIZE = 100;
+const MIRED_TO_KELVIN_FACTOR = 1000000;
+const WARM_WHITE_MAX_KELVIN = 4000;
+const HUE_MAX = 65535;
+const DEGREES_IN_CIRCLE = 360;
+const SATURATION_MAX = 254;
+const BRIGHTNESS_MAX = 254;
+const PERCENT = 100;
 
 export function formatRemainingTime(seconds) {
   if (!seconds) {
     return '--:--';
   }
-  const hours = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
+
+  const hours = Math.floor(seconds / SECONDS_PER_HOUR);
+  const mins = Math.floor((seconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE);
+
   if (hours > 0) {
     return `${hours}h ${mins}m`;
   }
+
   return `${mins}m`;
 }
 
@@ -118,39 +41,40 @@ export function formatTimeAgo(isoString) {
     return '';
   }
 
-  const date = new Date(isoString);
-  const now = new Date();
-  const diffMs = now - date;
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHour = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHour / 24);
+  const diffMs = new Date() - new Date(isoString);
 
-  if (diffSec < 60) {
+  return describeElapsedSeconds(Math.floor(diffMs / MS_PER_SECOND));
+}
+
+function describeElapsedSeconds(diffSec) {
+  const diffMin = Math.floor(diffSec / SECONDS_PER_MINUTE);
+  const diffHour = Math.floor(diffMin / MINUTES_PER_HOUR);
+  const diffDay = Math.floor(diffHour / HOURS_PER_DAY);
+
+  if (diffSec < SECONDS_PER_MINUTE) {
     return 'just now';
   }
-  if (diffMin === 1) {
-    return '1 min ago';
-  }
-  if (diffMin < 60) {
+
+  if (diffMin < MINUTES_PER_HOUR) {
     return `${diffMin} min ago`;
   }
-  if (diffHour === 1) {
-    return '1 hour ago';
+
+  if (diffHour < HOURS_PER_DAY) {
+    return pluralAgo(diffHour, 'hour');
   }
-  if (diffHour < 24) {
-    return `${diffHour} hours ago`;
-  }
-  if (diffDay === 1) {
-    return '1 day ago';
-  }
-  return `${diffDay} days ago`;
+
+  return pluralAgo(diffDay, 'day');
+}
+
+function pluralAgo(count, unit) {
+  return count === 1 ? `1 ${unit} ago` : `${count} ${unit}s ago`;
 }
 
 export function getDeviceIcon(category, archetype) {
   if (archetype && ARCHETYPE_ICONS[archetype]) {
     return ARCHETYPE_ICONS[archetype];
   }
+
   return CATEGORY_ICONS[category] || 'cpu';
 }
 
@@ -167,8 +91,9 @@ export function getLast24hValues(history) {
     return history;
   }
 
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  return history.filter(e => e.t >= cutoff).map(e => e.v);
+  const cutoff = Date.now() - MS_PER_DAY;
+
+  return history.filter(entry => entry.t >= cutoff).map(entry => entry.v);
 }
 
 export function renderSparkline(history, color) {
@@ -188,10 +113,11 @@ export function renderSparkline(history, color) {
   const max = Math.max(...values);
   const range = max - min || 1;
 
-  const points = values.map((val, i) => {
-    const x = (i / (values.length - 1)) * 100;
-    const y = 100 - ((val - min) / range) * 100;
-    return `${x},${y}`;
+  const points = values.map((reading, index) => {
+    const xPercent = (index / (values.length - 1)) * CHART_SIZE;
+    const yPercent = CHART_SIZE - ((reading - min) / range) * CHART_SIZE;
+
+    return `${xPercent},${yPercent}`;
   }).join(' ');
 
   return `
@@ -209,6 +135,7 @@ export function getLastMotionDetections(history) {
   }
 
   const detections = [];
+
   for (let i = history.length - 1; i >= 0; i--) {
     if (history[i].v === 1) {
       const time = new Date(history[i].t);
@@ -227,47 +154,59 @@ export function getLightColor(state) {
   }
 
   if (state.colormode === 'ct') {
-    const kelvin = Math.round(1000000 / state.ct);
-    if (kelvin < 4000) {
-      return '#ffcc88';
-    }
-    return '#fff5e6';
+    return colorTemperatureColor(state.ct);
   }
 
   if (state.hue !== undefined && state.sat !== undefined) {
-    const h = (state.hue / 65535) * 360;
-    const s = (state.sat / 254) * 100;
-    return `hsl(${h}, ${s}%, 50%)`;
+    const hueDegrees = (state.hue / HUE_MAX) * DEGREES_IN_CIRCLE;
+    const saturationPercent = (state.sat / SATURATION_MAX) * PERCENT;
+
+    return `hsl(${hueDegrees}, ${saturationPercent}%, 50%)`;
   }
 
   return '#fff';
 }
 
+function colorTemperatureColor(mired) {
+  const kelvin = Math.round(MIRED_TO_KELVIN_FACTOR / mired);
+
+  return kelvin < WARM_WHITE_MAX_KELVIN ? '#ffcc88' : '#fff5e6';
+}
+
 export function getStateText(light) {
+  const { state } = light;
+
   if (light.isSensor) {
-    if (light.state.temperature !== undefined) {
-      return `${light.state.temperature.toFixed(1)}C`;
-    }
-    if (light.state.presence !== undefined) {
-      return light.state.presence ? 'MOTION' : 'CLEAR';
-    }
-    if (light.state.lightlevel !== undefined) {
-      return `${light.state.lightlevel} lux`;
-    }
-    return '--';
+    return getSensorText(state);
   }
 
-  if (light.state.reachable === false) {
+  if (state.reachable === false) {
     return 'OFFLINE';
   }
 
-  if (!light.state.on) {
+  if (!state.on) {
     return 'OFF';
   }
 
-  if (light.state.bri !== undefined) {
-    return `${Math.round(light.state.bri / 254 * 100)}%`;
+  if (state.bri !== undefined) {
+    return `${Math.round(state.bri / BRIGHTNESS_MAX * PERCENT)}%`;
   }
 
   return 'ON';
+}
+
+function getSensorText(state) {
+  if (state.temperature !== undefined) {
+    return `${state.temperature.toFixed(1)}C`;
+  }
+
+  if (state.presence !== undefined) {
+    return state.presence ? 'MOTION' : 'CLEAR';
+  }
+
+  if (state.lightlevel !== undefined) {
+    return `${state.lightlevel} lux`;
+  }
+
+  return '--';
 }

@@ -1,8 +1,10 @@
-const {
-  parseOperationState,
-  parseDoorState,
-  parseProgramName
-} = require('../../src/services/homeconnect');
+let parseOperationState;
+let parseDoorState;
+let parseProgramName;
+
+beforeAll(async () => {
+  ({ parseOperationState, parseDoorState, parseProgramName } = await import('../../src/services/homeconnect'));
+});
 
 describe('homeconnect service', () => {
   describe('parseOperationState', () => {

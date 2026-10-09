@@ -11,39 +11,322 @@ const CATEGORY_ICONS = {
   pm25: 'wind'
 };
 
-function formatTimeAgo(isoString) {
-  if (!isoString || isoString === 'none') return '';
-  const date = new Date(isoString);
-  const now = new Date();
-  const diffMs = now - date;
-  const diffMin = Math.floor(diffMs / 60000);
-  const diffHour = Math.floor(diffMin / 60);
-  if (diffMin < 1) return 'just now';
-  if (diffMin < 60) return `${diffMin} min ago`;
-  if (diffHour < 24) return `${diffHour} hours ago`;
-  return `${Math.floor(diffHour / 24)} days ago`;
+const SENSOR_ORDER = ['temperature', 'motion', 'lightlevel', 'switch', 'pm25'];
+const STATIC_SPARKLINE_COLORS = new Map([
+  ['temperature', '#ff6b35'],
+  ['lightlevel', '#ffd700'],
+  ['switch', '#b388ff'],
+  ['pm25', '#00d4ff']
+]);
+const DEFAULT_SPARKLINE_COLOR = '#ff8c00';
+const EMPTY_READING = { value: '--', unit: '', minMax: null };
+const MAX_MOTION_DETECTIONS = 10;
+const SPARKLINE_SIZE = 100;
+const MS_PER_MINUTE = 60000;
+const MINUTES_PER_HOUR = 60;
+const HOURS_PER_DAY = 24;
+const MS_PER_DAY = HOURS_PER_DAY * MINUTES_PER_HOUR * MS_PER_MINUTE;
+
+export function renderSensors() {
+  const [sensors, setSensors] = useState([]);
+
+  useEffect(() => subscribeSensors(setSensors), []);
+
+  useEffect(refreshIcons, [sensors]);
+
+  if (sensors.length === 0) {
+    return html`<div class="loading">No sensors found</div>`;
+  }
+
+  return html`
+    ${sensors.map(sensor => html`<${sensorPanel} key=${sensor.id} sensor=${sensor} />`)}
+  `;
+}
+
+export { renderSensors as Sensors };
+
+function subscribeSensors(setSensors) {
+  return effect(() => {
+    const rooms = roomsState.value || [];
+    const sensorsRoom = rooms.find(room => room.id === 'sensors');
+
+    if (!sensorsRoom) {
+      return;
+    }
+
+    setSensors(orderSensors(sensorsRoom.lights || []));
+  });
+}
+
+function orderSensors(allSensors) {
+  return SENSOR_ORDER.flatMap(category => allSensors.filter(sensor => sensor.category === category));
+}
+
+function refreshIcons() {
+  if (window.lucide) {
+    window.lucide.createIcons();
+  }
+}
+
+function sensorPanel({ sensor }) {
+  const panelKey = `sensor:${sensor.storageId || sensor.id}`;
+  const displayName = getPanelDisplayName(panelKey, sensor.name);
+  const titleContent = useEditableTitle({ sensor, panelKey, displayName });
+  const reading = readSensor(sensor);
+
+  return html`
+    <section class="sensor-panel ${`sensor-${sensor.category}`} ${activeClassFor(sensor)}" data-panel-key=${panelKey} data-default-name=${sensor.name}>
+      <div class="sensor-header">
+        <i data-lucide=${CATEGORY_ICONS[sensor.category] || 'radio'}></i>
+        ${titleContent}
+      </div>
+      <div class="sensor-content">
+        <div class="sensor-main">
+          <span class="sensor-value">${reading.value}<span class="sensor-unit">${reading.unit}</span></span>
+          ${reading.minMax}
+        </div>
+        ${renderBottom(sensor)}
+      </div>
+    </section>
+  `;
+}
+
+function activeClassFor(sensor) {
+  return (sensor.category === 'motion' && sensor.state?.presence) ? 'active' : '';
+}
+
+function useEditableTitle({ sensor, panelKey, displayName }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(displayName);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    focusInput(inputRef, isEditing);
+  }, [isEditing]);
+
+  const stopEditing = () => setIsEditing(false);
+
+  const save = () => {
+    saveTitle({ sensor, panelKey, editValue });
+    stopEditing();
+  };
+
+  const startEditing = (event) => {
+    event.stopPropagation();
+    setEditValue(displayName);
+    setIsEditing(true);
+  };
+
+  if (!isEditing) {
+    return html`<span class="panel-title editable" onDblClick=${startEditing} title="Double-click to rename">${displayName}</span>`;
+  }
+
+  const onKeyDown = (event) => handleTitleKey({ event, save, cancel: stopEditing });
+
+  return renderTitleInput({ inputRef, editValue, setEditValue, onKeyDown, onBlur: stopEditing });
+}
+
+function focusInput(inputRef, isEditing) {
+  if (isEditing && inputRef.current) {
+    inputRef.current.focus();
+    inputRef.current.select();
+  }
+}
+
+function saveTitle({ sensor, panelKey, editValue }) {
+  const newName = editValue.trim();
+
+  if (newName && newName !== sensor.name) {
+    setPanelDisplayName(panelKey, newName);
+
+    return;
+  }
+
+  deletePanelDisplayName(panelKey);
+}
+
+function handleTitleKey({ event, save, cancel }) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    save();
+
+    return;
+  }
+
+  if (event.key === 'Escape') {
+    cancel();
+  }
+}
+
+function renderTitleInput({ inputRef, editValue, setEditValue, onKeyDown, onBlur }) {
+  return html`<input
+        ref=${inputRef}
+        type="text"
+        class="panel-title-input"
+        value=${editValue}
+        onInput=${(event) => setEditValue(event.target.value)}
+        onKeyDown=${onKeyDown}
+        onBlur=${onBlur}
+      />`;
+}
+
+function readSensor(sensor) {
+  const readReading = SENSOR_READERS.get(sensor.category);
+
+  return readReading ? readReading(sensor) : EMPTY_READING;
+}
+
+function readTemperature(sensor) {
+  const temperature = sensor.state?.temperature;
+
+  if (temperature === undefined) {
+    return EMPTY_READING;
+  }
+
+  return {
+    value: temperature.toFixed(1),
+    unit: '°C',
+    minMax: minMaxLabel(sensor.dailyStats, reading => reading.toFixed(1))
+  };
+}
+
+function readMotion(sensor) {
+  return { value: sensor.state?.presence ? 'DETECTED' : 'CLEAR', unit: '', minMax: null };
+}
+
+function readLightLevel(sensor) {
+  const lightlevel = sensor.state?.lightlevel;
+
+  if (lightlevel === undefined) {
+    return EMPTY_READING;
+  }
+
+  return { value: lightlevel, unit: ' lux', minMax: null };
+}
+
+function readSwitch() {
+  return { value: 'READY', unit: '', minMax: null };
+}
+
+function readPm25(sensor) {
+  const pm25 = sensor.state?.pm25;
+
+  if (pm25 === undefined) {
+    return EMPTY_READING;
+  }
+
+  return {
+    value: pm25,
+    unit: ' µg/m³',
+    minMax: minMaxLabel(sensor.dailyStats, reading => reading)
+  };
+}
+
+const SENSOR_READERS = new Map([
+  ['temperature', readTemperature],
+  ['motion', readMotion],
+  ['lightlevel', readLightLevel],
+  ['switch', readSwitch],
+  ['pm25', readPm25]
+]);
+
+function minMaxLabel(dailyStats, format) {
+  if (!dailyStats) {
+    return null;
+  }
+
+  const { min, max } = dailyStats;
+
+  return html`<span class="sensor-minmax">${format(min)} / ${format(max)}</span>`;
+}
+
+function renderBottom(sensor) {
+  if (sensor.category === 'motion') {
+    return renderMotionDetections(sensor);
+  }
+
+  if (sensor.category === 'switch') {
+    return renderSwitchLastPress(sensor);
+  }
+
+  return html`<${sparkline} history=${sensor.history} color=${sparklineColor(sensor)} />`;
+}
+
+function sparklineColor(sensor) {
+  return STATIC_SPARKLINE_COLORS.get(sensor.category) || DEFAULT_SPARKLINE_COLOR;
+}
+
+function renderSwitchLastPress(sensor) {
+  const lastUpdated = sensor.state?.lastupdated;
+  const timeAgo = lastUpdated ? formatTimeAgo(lastUpdated) : '';
+
+  return html`<div class="switch-lastpress"><span>${timeAgo || 'No presses recorded'}</span></div>`;
+}
+
+function renderMotionDetections(sensor) {
+  const detections = getLastMotionDetections(sensor.history);
+
+  if (detections.length > 0) {
+    return html`
+      <div class="motion-detections">${detections.map(detection => html`<span key=${detection}>${detection}</span>`)}</div>
+    `;
+  }
+
+  const lastUpdated = sensor.state?.lastupdated;
+  const message = lastUpdated ? formatTimeAgo(lastUpdated) : 'No recent activity';
+
+  return html`<div class="motion-detections"><span>${message}</span></div>`;
 }
 
 function getLastMotionDetections(history) {
-  if (!history || history.length === 0) return [];
+  if (!history || history.length === 0) {
+    return [];
+  }
+
   const detections = [];
-  for (let i = history.length - 1; i >= 0 && detections.length < 10; i--) {
+
+  for (let i = history.length - 1; i >= 0 && detections.length < MAX_MOTION_DETECTIONS; i--) {
     if (history[i].v === 1) {
-      const time = new Date(history[i].t);
-      detections.push(`${time.getHours().toString().padStart(2, '0')}:${time.getMinutes().toString().padStart(2, '0')}`);
+      detections.push(formatClock(history[i].t));
     }
   }
+
   return detections;
 }
 
-function getLast24hValues(history) {
-  if (!history || history.length === 0) return [];
-  if (typeof history[0] === 'number') return history;
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  return history.filter(e => e.t >= cutoff).map(e => e.v);
+function formatClock(timestamp) {
+  const time = new Date(timestamp);
+  const hours = time.getHours().toString().padStart(2, '0');
+  const mins = time.getMinutes().toString().padStart(2, '0');
+
+  return `${hours}:${mins}`;
 }
 
-function Sparkline({ history, color }) {
+function formatTimeAgo(isoString) {
+  if (!isoString || isoString === 'none') {
+    return '';
+  }
+
+  const diffMin = Math.floor((Date.now() - new Date(isoString).getTime()) / MS_PER_MINUTE);
+
+  if (diffMin < 1) {
+    return 'just now';
+  }
+
+  if (diffMin < MINUTES_PER_HOUR) {
+    return `${diffMin} min ago`;
+  }
+
+  const diffHour = Math.floor(diffMin / MINUTES_PER_HOUR);
+
+  if (diffHour < HOURS_PER_DAY) {
+    return `${diffHour} hours ago`;
+  }
+
+  return `${Math.floor(diffHour / HOURS_PER_DAY)} days ago`;
+}
+
+function sparkline({ history, color }) {
   const values = getLast24hValues(history);
 
   if (values.length < 2) {
@@ -56,183 +339,38 @@ function Sparkline({ history, color }) {
     `;
   }
 
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const points = values.map((val, i) => {
-    const x = (i / (values.length - 1)) * 100;
-    const y = 100 - ((val - min) / range) * 100;
-    return `${x},${y}`;
-  }).join(' ');
-
   return html`
     <div class="sparkline">
       <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-        <polyline points=${points} fill="none" stroke=${color} stroke-width="2" vector-effect="non-scaling-stroke"/>
+        <polyline points=${sparklinePoints(values)} fill="none" stroke=${color} stroke-width="2" vector-effect="non-scaling-stroke"/>
       </svg>
     </div>
   `;
 }
 
-function SensorPanel({ sensor }) {
-  const icon = CATEGORY_ICONS[sensor.category] || 'radio';
-  const typeClass = `sensor-${sensor.category}`;
-  const panelKey = `sensor:${sensor.storageId || sensor.id}`;
-  const displayName = getPanelDisplayName(panelKey, sensor.name);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editValue, setEditValue] = useState(displayName);
-  const inputRef = useRef(null);
+function sparklinePoints(values) {
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
 
-  useEffect(() => {
-    if (isEditing && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.select();
-    }
-  }, [isEditing]);
+  return values.map((sample, i) => {
+    const xPosition = (i / (values.length - 1)) * SPARKLINE_SIZE;
+    const yPosition = SPARKLINE_SIZE - ((sample - min) / range) * SPARKLINE_SIZE;
 
-  const handleDoubleClick = (e) => {
-    e.stopPropagation();
-    setEditValue(displayName);
-    setIsEditing(true);
-  };
-
-  const handleSave = () => {
-    const newName = editValue.trim();
-    if (newName && newName !== sensor.name) {
-      setPanelDisplayName(panelKey, newName);
-    } else {
-      deletePanelDisplayName(panelKey);
-    }
-    setIsEditing(false);
-  };
-
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      handleSave();
-    } else if (e.key === 'Escape') {
-      setIsEditing(false);
-    }
-  };
-
-  const handleBlur = () => {
-    setIsEditing(false);
-  };
-
-  let value = '--';
-  let unit = '';
-  let minMax = null;
-
-  if (sensor.category === 'temperature' && sensor.state?.temperature !== undefined) {
-    value = sensor.state.temperature.toFixed(1);
-    unit = '°C';
-    if (sensor.dailyStats) {
-      minMax = html`<span class="sensor-minmax">${sensor.dailyStats.min.toFixed(1)} / ${sensor.dailyStats.max.toFixed(1)}</span>`;
-    }
-  } else if (sensor.category === 'motion') {
-    value = sensor.state?.presence ? 'DETECTED' : 'CLEAR';
-  } else if (sensor.category === 'lightlevel' && sensor.state?.lightlevel !== undefined) {
-    value = sensor.state.lightlevel;
-    unit = ' lux';
-  } else if (sensor.category === 'switch') {
-    value = 'READY';
-  } else if (sensor.category === 'pm25' && sensor.state?.pm25 !== undefined) {
-    value = sensor.state.pm25;
-    unit = ' µg/m³';
-    if (sensor.dailyStats) {
-      minMax = html`<span class="sensor-minmax">${sensor.dailyStats.min} / ${sensor.dailyStats.max}</span>`;
-    }
-  }
-
-  const activeClass = (sensor.category === 'motion' && sensor.state?.presence) ? 'active' : '';
-
-  const colorMap = {
-    temperature: '#ff6b35',
-    motion: sensor.state?.presence ? '#00ff88' : '#00d4ff',
-    lightlevel: '#ffd700',
-    switch: '#b388ff',
-    pm25: '#00d4ff'
-  };
-  const sparklineColor = colorMap[sensor.category] || '#ff8c00';
-
-  let bottomContent = html`<${Sparkline} history=${sensor.history} color=${sparklineColor} />`;
-
-  if (sensor.category === 'motion') {
-    const detections = getLastMotionDetections(sensor.history);
-    if (detections.length > 0) {
-      bottomContent = html`
-        <div class="motion-detections">${detections.map(d => html`<span key=${d}>${d}</span>`)}</div>
-      `;
-    } else if (sensor.state?.lastupdated) {
-      bottomContent = html`<div class="motion-detections"><span>${formatTimeAgo(sensor.state.lastupdated)}</span></div>`;
-    } else {
-      bottomContent = html`<div class="motion-detections"><span>No recent activity</span></div>`;
-    }
-  } else if (sensor.category === 'switch') {
-    const timeAgo = sensor.state?.lastupdated ? formatTimeAgo(sensor.state.lastupdated) : '';
-    bottomContent = html`<div class="switch-lastpress"><span>${timeAgo || 'No presses recorded'}</span></div>`;
-  }
-
-  const titleContent = isEditing
-    ? html`<input
-        ref=${inputRef}
-        type="text"
-        class="panel-title-input"
-        value=${editValue}
-        onInput=${(e) => setEditValue(e.target.value)}
-        onKeyDown=${handleKeyDown}
-        onBlur=${handleBlur}
-      />`
-    : html`<span class="panel-title editable" onDblClick=${handleDoubleClick} title="Double-click to rename">${displayName}</span>`;
-
-  return html`
-    <section class="sensor-panel ${typeClass} ${activeClass}" data-panel-key=${panelKey} data-default-name=${sensor.name}>
-      <div class="sensor-header">
-        <i data-lucide=${icon}></i>
-        ${titleContent}
-      </div>
-      <div class="sensor-content">
-        <div class="sensor-main">
-          <span class="sensor-value">${value}<span class="sensor-unit">${unit}</span></span>
-          ${minMax}
-        </div>
-        ${bottomContent}
-      </div>
-    </section>
-  `;
+    return `${xPosition},${yPosition}`;
+  }).join(' ');
 }
 
-export function Sensors() {
-  const [sensors, setSensors] = useState([]);
-
-  useEffect(() => {
-    const dispose = effect(() => {
-      const rooms = roomsState.value || [];
-      const sensorsRoom = rooms.find(r => r.id === 'sensors');
-      if (sensorsRoom) {
-        const allSensors = sensorsRoom.lights || [];
-        const temp = allSensors.filter(s => s.category === 'temperature');
-        const motion = allSensors.filter(s => s.category === 'motion');
-        const light = allSensors.filter(s => s.category === 'lightlevel');
-        const switches = allSensors.filter(s => s.category === 'switch');
-        const pm25 = allSensors.filter(s => s.category === 'pm25');
-        setSensors([...temp, ...motion, ...light, ...switches, ...pm25]);
-      }
-    });
-    return dispose;
-  }, []);
-
-  useEffect(() => {
-    if (window.lucide) {
-      window.lucide.createIcons();
-    }
-  }, [sensors]);
-
-  if (sensors.length === 0) {
-    return html`<div class="loading">No sensors found</div>`;
+function getLast24hValues(history) {
+  if (!history || history.length === 0) {
+    return [];
   }
 
-  return html`
-    ${sensors.map(sensor => html`<${SensorPanel} key=${sensor.id} sensor=${sensor} />`)}
-  `;
+  if (typeof history[0] === 'number') {
+    return history;
+  }
+
+  const cutoff = Date.now() - MS_PER_DAY;
+
+  return history.filter(entry => entry.t >= cutoff).map(entry => entry.v);
 }
